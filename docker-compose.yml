@@ -1,0 +1,17 @@
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml"]
+    env_file:
+      - .env
+    # Lets the container reach vLLM running on the HOST machine.
+    # Works on Docker Desktop (Mac/Win) automatically; the line below
+    # makes it work on Linux too.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
