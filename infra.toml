@@ -1,0 +1,55 @@
+# infra.toml — declares this project's services to server-infra's `infra` CLI.
+# Register from this dir:  uv run --project ~/code/system/server-infra/cli infra register
+# Field reference: ~/code/system/server-infra/docs/infra-config.md
+#
+# Topology: `litellm` is the front door (the router). The three `vllm-*` entries are the
+# model servers it proxies to over the docker bridge (host.docker.internal). They run on the
+# HOST because they own the GPU.
+#
+# VRAM CAVEAT — infra cannot express the GPU budget. Registering all three only RESERVES their
+# ports + renders their units; it does NOT mean run all three. Only `infra enable` a combination
+# that fits one 32GB card: chat (0.35) + embed (0.15) co-run; coder (0.90) runs solo.
+# (`./serve.sh --list` prints the budget.)
+
+# ── Front door: LiteLLM proxy (container) ──────────────────────────────────────────────────
+[[service]]
+name = "litellm"
+role = "llm-proxy"            # port range 4000–4099
+reach = "tailnet"            # Caddy HTTPS route at /litellm; switch to "host" for box-only, no route
+path = "/litellm"
+kind = "compose"
+compose_file = "./docker-compose.yml"
+service = "litellm"          # the service name inside docker-compose.yml
+port = 4000                  # pinned: the compose publishes 127.0.0.1:4000 and llm-config assumes it
+
+# ── Model servers: vLLM on the host (systemd) ──────────────────────────────────────────────
+# exec_start args are kept verbatim, so one serve.sh drives all three. infra bakes
+# Environment=PORT=<port>, which serve.sh now honors (see INFRA_PORT in serve.sh).
+# reach = "host": no Caddy route — only litellm reaches these, via host.docker.internal.
+
+[[service]]
+name = "vllm-chat"
+role = "backend"             # 8000–8099, matching the ports these already use
+reach = "host"
+kind = "systemd"
+exec_start = "./serve.sh chat"
+working_dir = "."
+port = 8001
+
+[[service]]
+name = "vllm-embed"
+role = "backend"
+reach = "host"
+kind = "systemd"
+exec_start = "./serve.sh embed"
+working_dir = "."
+port = 8002
+
+[[service]]
+name = "vllm-coder"
+role = "backend"
+reach = "host"
+kind = "systemd"
+exec_start = "./serve.sh coder"
+working_dir = "."
+port = 8003

@@ -22,7 +22,11 @@
 set -euo pipefail
 
 # The uv project that has vllm installed (`uv add vllm` was run here).
-LLM_PROJECT="${LLM_PROJECT:-$HOME/code/llm-0}"
+# Absolute defaults, not $HOME-relative: systemd runs the unit with a stripped env, so $HOME
+# and PATH can't be relied on. uv lives under ~/.local/bin which is NOT on systemd's PATH, so
+# call it by absolute path. Override any of these via the environment.
+LLM_PROJECT="${LLM_PROJECT:-/home/beans/code/llm-0}"
+UV="${UV:-/home/beans/.local/bin/uv}"
 BIND_HOST="${BIND_HOST:-0.0.0.0}"
 
 # ── Model table ─────────────────────────────────────────────────────────────────
@@ -30,6 +34,13 @@ BIND_HOST="${BIND_HOST:-0.0.0.0}"
 # MAXLEN caps context length — it directly drives KV-cache VRAM, so lower it if a
 # model won't fit. Leave it empty to use the model's own default.
 KEYS=(chat embed coder)
+
+# infra renders the systemd unit with `Environment=PORT=<assigned>`. Capture it before the
+# PORT associative array below shadows the name, and unset so `declare -A PORT` starts clean.
+# When set (i.e. launched by infra/systemd), it overrides the per-key port in the table below;
+# when unset (manual `./serve.sh <key>`), the table value is used.
+INFRA_PORT="${PORT:-}"
+unset PORT
 declare -A REPO PORT MEM TASK MAXLEN EXTRA
 
 REPO[chat]="Qwen/Qwen3.5-4B"
@@ -73,10 +84,13 @@ main() {
     exit 2
   fi
 
-  local cmd=( uv run --project "$LLM_PROJECT" vllm serve "${REPO[$key]}"
+  # infra's Environment=PORT (captured as INFRA_PORT) wins when present; else the table value.
+  local port="${INFRA_PORT:-${PORT[$key]}}"
+
+  local cmd=( "$UV" run --project "$LLM_PROJECT" vllm serve "${REPO[$key]}"
               --served-model-name "$key"
               --host "$BIND_HOST"
-              --port "${PORT[$key]}"
+              --port "$port"
               --gpu-memory-utilization "${MEM[$key]}" )
   [[ "${TASK[$key]}" == "embed" ]] && cmd+=( --task embed )
   [[ -n "${MAXLEN[$key]}" ]]       && cmd+=( --max-model-len "${MAXLEN[$key]}" )
@@ -84,7 +98,7 @@ main() {
   # shellcheck disable=SC2206
   [[ -n "${EXTRA[$key]}" ]]        && cmd+=( ${EXTRA[$key]} )
 
-  echo "[+] '$key' → ${REPO[$key]}  on ${BIND_HOST}:${PORT[$key]}  (gpu-mem ${MEM[$key]})"
+  echo "[+] '$key' → ${REPO[$key]}  on ${BIND_HOST}:${port}  (gpu-mem ${MEM[$key]})"
   echo "[+] ${cmd[*]}"
   exec "${cmd[@]}"   # replace shell so Ctrl-C / systemd signals reach vLLM directly
 }

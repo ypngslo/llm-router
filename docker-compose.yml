@@ -3,10 +3,11 @@ services:
     image: ghcr.io/berriai/litellm:main-latest
     container_name: litellm
     restart: unless-stopped
+    # Loopback only — per infra, just Caddy ever listens on a public interface.
     ports:
-      - "4000:4000"
+      - "127.0.0.1:4000:4000"
     volumes:
-      - ./config.yaml:/app/config.yaml:ro
+      - ./llm-config.yml:/app/config.yaml:ro
     command: ["--config", "/app/config.yaml"]
     env_file:
       - .env
