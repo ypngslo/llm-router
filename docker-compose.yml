@@ -3,16 +3,65 @@ services:
     image: ghcr.io/berriai/litellm:main-latest
     container_name: litellm
     restart: unless-stopped
-    # Loopback only — per infra, just Caddy ever listens on a public interface.
-    ports:
-      - "127.0.0.1:4000:4000"
+    # Host networking: share the host network namespace so the proxy reaches the
+    # vLLM backends (host systemd services on 0.0.0.0:800x) over loopback. This
+    # avoids the docker-bridge -> host hop that ufw drops (8001/tcp DENY) while
+    # keeping those ports firewalled from the outside world. Under host networking
+    # the `ports:` mapping is ignored, so we bind loopback explicitly via --host
+    # below — per infra, only Caddy ever listens on a public interface.
+    network_mode: host
     volumes:
       - ./llm-config.yml:/app/config.yaml:ro
-    command: ["--config", "/app/config.yaml"]
+    command: ["--config", "/app/config.yaml", "--host", "127.0.0.1", "--port", "4000"]
     env_file:
       - .env
-    # Lets the container reach vLLM running on the HOST machine.
-    # Works on Docker Desktop (Mac/Win) automatically; the line below
-    # makes it work on Linux too.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+
+  # --- Speech-to-text: NVIDIA Parakeet TDT 0.6B v3, int8 ONNX on CPU -------------------
+  # OpenAI-compatible /v1/audio/transcriptions (+ SSE streaming). ~30x realtime on CPU,
+  # so it costs zero VRAM and keeps working whatever the GPU is doing. Models are baked
+  # into the image. Bridge network + loopback publish: only LiteLLM (host netns) and the
+  # box reach it. Swap image to :latest-cuda for GPU fp32 if CPU ever becomes the bottleneck.
+  parakeet:
+    image: ghcr.io/achetronic/parakeet:latest
+    container_name: parakeet
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8005:5092"     # 5092 = parakeet's default internal port
+    environment:
+      PARAKEET_WORKERS: "2"
+
+  # --- Text-to-speech: Kokoro-82M on CPU ------------------------------------------------
+  # OpenAI-compatible /v1/audio/speech. Realtime on CPU; POST /dev/unload frees the model
+  # if it's ever moved to GPU. Voices: af_bella, af_sky, ... (mixes: "af_bella(2)+af_sky(1)").
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    container_name: kokoro
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8006:8880"     # 8880 = kokoro-fastapi's default internal port
+    environment:
+      API_LOG_LEVEL: "INFO"
+
+  # --- Document conversion: docling-serve (GPU, CUDA 12.8 build for Blackwell/sm_120) ---
+  # NOT an OpenAI API — it gets its own Caddy route (/docling via infra.toml), not a
+  # LiteLLM model entry. Auth: X-Api-Key = DOCLING_API_KEY from .env. Sized for one
+  # worker (~4-6 GB VRAM, fits beside the vLLM trio's 0.75 reservation). CUDA images
+  # have no :latest tag — pin the version. Known slow GPU/RAM leaks upstream: an
+  # occasional `docker restart docling` is the reliable reclaim.
+  # docling is a MANAGED GPU TENANT of waker.py: the waker binds the public :8007
+  # (see [[container]] in models.toml) and forwards here (:8009), docker-stopping
+  # this container when the coder needs the VRAM and starting it on demand.
+  # restart: no — the waker owns the lifecycle; unless-stopped would resurrect it
+  # behind the waker's back after a reboot swap.
+  docling:
+    image: ghcr.io/docling-project/docling-serve-cu128:v1.26.0
+    container_name: docling
+    restart: "no"
+    ports:
+      - "127.0.0.1:8011:5001"     # 5001 = docling-serve's default internal port
+    environment:
+      DOCLING_SERVE_ENABLE_UI: "true"
+      DOCLING_SERVE_API_KEY: "${DOCLING_API_KEY}"
+      DOCLING_SERVE_ENG_LOC_NUM_WORKERS: "1"   # bound VRAM: one worker
+      DOCLING_SERVE_OPTIONS_CACHE_SIZE: "1"    # each cached option-set holds its own model copies
+    gpus: all
