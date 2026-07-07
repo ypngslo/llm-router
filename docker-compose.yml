@@ -12,7 +12,7 @@ services:
     network_mode: host
     volumes:
       - ./llm-config.yml:/app/config.yaml:ro
-    command: ["--config", "/app/config.yaml", "--host", "127.0.0.1", "--port", "4000"]
+    command: ["--config", "/app/config.yaml", "--host", "127.0.0.1", "--port", "${PORT_LITELLM:-4000}"]
     env_file:
       - .env
 
@@ -26,7 +26,9 @@ services:
     container_name: parakeet
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8005:5092"     # 5092 = parakeet's default internal port
+      # PORT_* comes from the infra registry (infra enable/restart injects it);
+      # the fallback keeps bare `docker compose up` working.
+      - "127.0.0.1:${PORT_PARAKEET:-8005}:5092"   # 5092 = parakeet's default internal port
     environment:
       PARAKEET_WORKERS: "2"
 
@@ -38,7 +40,7 @@ services:
     container_name: kokoro
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8006:8880"     # 8880 = kokoro-fastapi's default internal port
+      - "127.0.0.1:${PORT_KOKORO:-8006}:8880"     # 8880 = kokoro-fastapi's default internal port
     environment:
       API_LOG_LEVEL: "INFO"
 
@@ -58,7 +60,9 @@ services:
     container_name: docling
     restart: "no"
     ports:
-      - "127.0.0.1:8011:5001"     # 5001 = docling-serve's default internal port
+      # PORT_DOCLING_APP = the real container (this service); PORT_DOCLING (8007) is
+      # the public port, bound by the waker's passthrough listener.
+      - "127.0.0.1:${PORT_DOCLING_APP:-8011}:5001"   # 5001 = docling-serve's default internal port
     environment:
       DOCLING_SERVE_ENABLE_UI: "true"
       DOCLING_SERVE_API_KEY: "${DOCLING_API_KEY}"
