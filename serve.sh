@@ -33,7 +33,7 @@ BIND_HOST="${BIND_HOST:-0.0.0.0}"
 # Edit these as you swap in real models. KEYS sets display/order.
 # MAXLEN caps context length — it directly drives KV-cache VRAM, so lower it if a
 # model won't fit. Leave it empty to use the model's own default.
-KEYS=(chat embed coder)
+KEYS=(chat embed)   # coder disabled for now — only chat+embed needed (they co-fit; coder runs solo)
 
 # infra renders the systemd unit with `Environment=PORT=<assigned>`. Capture it before the
 # PORT associative array below shadows the name, and unset so `declare -A PORT` starts clean.
@@ -44,20 +44,30 @@ unset PORT
 declare -A REPO PORT MEM TASK MAXLEN EXTRA
 
 REPO[chat]="Qwen/Qwen3.5-4B"
-PORT[chat]=8001;  MEM[chat]=0.35; TASK[chat]="generate"; MAXLEN[chat]=32768
-EXTRA[chat]="--reasoning-parser qwen3"   # Qwen3.5 needs vLLM from main; see README
+# 0.55 ≈ 18 GB: ~8.6 GB weights leave ~8 GB KV cache for concurrency. Co-runs with embed
+# (~10 GB) → ~28 GB total. Bumped from 0.35, which left ~0 for KV once embed was resident.
+PORT[chat]=8001;  MEM[chat]=0.55; TASK[chat]="generate"; MAXLEN[chat]=32768
+# --enable-auto-tool-choice + --tool-call-parser: required for OpenAI-style tool calls
+# (the agent binds tools and sends tool_choice="auto"). Qwen3.5 emits XML-style
+# <tool_call><function=NAME>...</function></tool_call>, so use the qwen3_xml parser
+# (NOT hermes, which expects JSON). qwen3_coder is the coder-model variant.
+EXTRA[chat]="--reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_xml"   # Qwen3.5 needs vLLM from main; see README
 
-REPO[embed]="your-embedding-model"
-PORT[embed]=8002; MEM[embed]=0.15; TASK[embed]="embed";  MAXLEN[embed]=""
+REPO[embed]="Qwen/Qwen3-Embedding-4B"
+# 0.30 ≈ 9.8 GB: Qwen3-Embedding-4B is a full 4B model (~8 GB weights), so the old 0.15 (~4.9 GB)
+# couldn't even hold the weights. Co-runs with chat (0.35); raise further only if it still OOMs.
+# MAXLEN caps context → KV-cache size. Empty = the model's 40960 default, which needs ~5.6 GB
+# of KV cache and won't fit alongside the 7.5 GB of weights in this budget. Embeddings work on
+# short chunks, so 4096 is plenty and keeps KV cache to ~0.6 GB.
+PORT[embed]=8002; MEM[embed]=0.30; TASK[embed]="embed";  MAXLEN[embed]=4096
 EXTRA[embed]=""
 
-REPO[coder]="Qwen/Qwen2.5-Coder-32B-Instruct"
-PORT[coder]=8003; MEM[coder]=0.90; TASK[coder]="generate"; MAXLEN[coder]=16384
-EXTRA[coder]=""
-# A 32B in BF16 is ~64 GB of weights — it will NOT fit on 32 GB. Use a quantized
-# build and run it solo, e.g.:
-#   REPO[coder]="Qwen/Qwen2.5-Coder-32B-Instruct-AWQ"
-#   EXTRA[coder]="--quantization awq"
+# --- coder: disabled for now (uncomment + re-add `coder` to KEYS to enable; run it SOLO) ---
+# AWQ 4-bit build (~19 GB) so it fits on one 32 GB card; run it solo (MEM 0.90).
+# Repo id: HF downloads/caches it on first run (~19 GB into ~/.cache/huggingface).
+# REPO[coder]="Qwen/Qwen2.5-Coder-32B-Instruct-AWQ"
+# PORT[coder]=8003; MEM[coder]=0.90; TASK[coder]="generate"; MAXLEN[coder]=16384
+# EXTRA[coder]="--quantization awq"
 
 # ── List mode ─────────────────────────────────────────────────────────────────
 list() {
@@ -92,7 +102,8 @@ main() {
               --host "$BIND_HOST"
               --port "$port"
               --gpu-memory-utilization "${MEM[$key]}" )
-  [[ "${TASK[$key]}" == "embed" ]] && cmd+=( --task embed )
+  # vLLM 0.22 dropped --task; an embedding model is now selected with --runner pooling.
+  [[ "${TASK[$key]}" == "embed" ]] && cmd+=( --runner pooling )
   [[ -n "${MAXLEN[$key]}" ]]       && cmd+=( --max-model-len "${MAXLEN[$key]}" )
   # Intentional word-splitting so EXTRA can hold multiple flags.
   # shellcheck disable=SC2206

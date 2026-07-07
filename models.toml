@@ -1,0 +1,145 @@
+# models.toml — single source of truth for the vLLM model servers.
+# serve.py reads this; edit here, not in the launcher.
+#
+# VRAM budget (one RTX 5090 = 32 GB): each `vllm serve` reserves `memory` (a
+# fraction of the card) up front. Models co-run only if their enabled fractions
+# sum to < ~0.95. `serve.py --list` prints the running total and warns.
+#
+# Ports are NOT here: infra.toml owns them (it bakes Environment=PORT=<port> into
+# the systemd unit, which serve.py reads). For a manual run, pass PORT=<n> yourself.
+#
+# Sleep mode: every model runs with --enable-sleep-mode and sits behind waker.py
+# (the sleep-aware proxy on :8008 that LiteLLM actually talks to). Per-model knobs
+# read by waker.py, not serve.py:
+#   sleep_level  1 = weights parked in CPU RAM (~1s wake; costs RAM — box has ~9 GB
+#                    spare, so only the 0.6B models use it)
+#                2 = weights discarded (~seconds wake from NVMe cache; ~0 RAM)
+#   sleep_ttl    seconds idle before waker parks it; 0 = stay awake until another
+#                model needs the VRAM (eviction is LRU among idle models).
+
+[defaults]
+# The uv project that has vllm installed. "." = this repo (it owns its own vllm
+# via pyproject.toml). serve.py resolves a relative path against the repo dir, so
+# this works under systemd's stripped env too. Set an absolute path to override.
+project = "."
+# vLLM runs on the HOST and the LiteLLM container reaches it over the docker
+# bridge, so bind where the bridge can hit it. Keep these ports off the LAN with
+# ufw (e.g. `sudo ufw deny 8001:8003/tcp`).
+bind_host = "0.0.0.0"
+
+# --- Chat (Qwen3.5-4B) -------------------------------------------------------
+# params: Qwen3.5 emits XML-style tool calls, so qwen3_xml parser (NOT hermes,
+# which expects JSON). --enable-auto-tool-choice is required for the agent's
+# tool_choice="auto".
+[[model]]
+enable  = true
+slug    = "chat"            # vLLM --served-model-name; llm-config.yml must match this, not `name`
+name    = "Qwen/Qwen3.5-4B" # HF repo id
+task    = "generate"
+memory  = 0.55
+# 6144 = what 0.55 actually delivers as KV (measured: 387 blocks × 16 = 6,192 tok,
+# co-resident with embed). The old 32768 was unreachable — vLLM only had ~6k of cache.
+# Raise this only by raising memory and/or adding fp8 KV (see serve-sizing-plan.md).
+maxlen  = 6144
+# overhead_gb: VRAM vLLM reserves beyond weights+KV (activations/CUDA graphs/profiling).
+# Measured ~8 GiB for this model at 32k; serve.py uses it for the launch fit check.
+overhead_gb = 8.0
+params  = "--reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_xml --enable-sleep-mode"
+sleep_level = 2             # 8 GB of weights won't fit the box's spare RAM; reload from NVMe
+sleep_ttl   = 0             # stay awake; only slept when coder needs the card
+weights = "~8 GB"           # bf16 weights (informational, shown in --list)
+context = "32k"
+# Optional upgrade: "--kv-cache-dtype fp8" halves KV bytes/token → roughly doubles
+# the maxlen this memory fraction can deliver (6144 → ~12k). Accuracy is fine at
+# chat lengths; documented degradation is mostly >32k. Benchmark after enabling.             # model's native context window (informational)
+
+# --- Embeddings (Qwen3-Embedding-4B) -----------------------------------------
+# maxlen caps KV-cache size; embeddings work on short chunks so 4096 is plenty.
+[[model]]
+enable  = false
+slug    = "embed"
+name    = "Qwen/Qwen3-Embedding-4B"
+task    = "embed"           # → vLLM --runner pooling (0.22 dropped --task)
+memory  = 0.30
+maxlen  = 4096
+overhead_gb = 1.5           # pooling runner reserves far less than a generate model (~1.4 GiB measured)
+params  = ""
+weights = "~8 GB"
+context = "32k"
+
+# --- Embeddings, light (Qwen3-Embedding-0.6B) — disabled alternative to the 4B --
+# ~1.2 GB weights vs ~8 GB: frees ~7 GB for chat. ~5 pts lower on MMTEB than the 4B,
+# but near-SOTA for its size — fine for English/clean-corpus RAG, esp. with a reranker.
+# To switch: disable the 4B `embed` above, enable this, and point llm-config.yml's
+# `embeddings` model at this slug (+ give it a port/service in infra.toml).
+[[model]]
+enable  = true
+slug    = "embed-sm"
+name    = "Qwen/Qwen3-Embedding-0.6B"
+task    = "embed"           # → vLLM --runner pooling
+memory  = 0.10
+maxlen  = 4096
+overhead_gb = 1.0
+params  = "--enable-sleep-mode"
+sleep_level = 1             # 1.2 GB — cheap to park in RAM, instant wake
+sleep_ttl   = 0             # dad-rag hits this constantly; never auto-sleep
+weights = "~1.2 GB"
+context = "32k"
+
+# --- Reranker (Qwen3-Reranker-0.6B) -------------------------------------------
+# Cross-encoder for RAG reranking (dad-rag Stage 3): scores (query, passage) pairs
+# via vLLM's /rerank endpoint. The original Qwen3-Reranker weights are a causal-LM
+# checkpoint; the hf-overrides JSON converts them to a sequence-classification
+# model (per the model card's vLLM instructions). The JSON has no spaces because
+# serve.py splits `params` on whitespace.
+[[model]]
+enable  = true
+slug    = "rerank"
+name    = "Qwen/Qwen3-Reranker-0.6B"
+task    = "score"           # → vLLM --runner pooling (cross-encoder scoring)
+memory  = 0.10
+maxlen  = 4096
+overhead_gb = 1.0
+params  = '--hf-overrides {"architectures":["Qwen3ForSequenceClassification"],"classifier_from_token":["no","yes"],"is_original_qwen3_reranker":true} --enable-sleep-mode'
+sleep_level = 1             # 1.2 GB — cheap to park in RAM, instant wake
+sleep_ttl   = 0
+weights = "~1.2 GB"
+context = "32k"
+
+# --- Managed GPU containers -----------------------------------------------------
+# Non-vLLM GPU tenants the waker manages with docker stop/start instead of
+# sleep/wake. `listen` = the stable public port (the waker binds it; Caddy and
+# clients keep using it); `upstream` = where the container actually listens.
+# docling: ~5 GB when its models are loaded (0.16 of the card). sleep_ttl doubles
+# as the leak mitigation — a stopped container is the only reliable VRAM reclaim.
+# grace 300s: status-polls on running conversions refresh last-use, so an active
+# ingestion won't have its container stopped for an idle-ish coder.
+[[container]]
+slug     = "docling"
+container = "docling"       # docker container_name
+listen   = 8007             # waker binds this; infra.toml routes Caddy /docling here
+upstream = 8011             # compose publishes the real container here (registered as docling-app)
+memory   = 0.16
+grace    = 300
+sleep_ttl = 1800            # auto-stop after 30 min idle (also reclaims leaked VRAM)
+
+# --- Code (Qwen2.5-Coder-32B-AWQ) — disabled: cannot co-run with chat (memory 0.90) ---
+# Sleep-mode plan (docs/coder-sleep-mode.md): the unit runs permanently with
+# --enable-sleep-mode and is parked at level 2 (~0 VRAM) when idle; ./swap.sh
+# wakes it in seconds instead of a 1-2 min cold boot. VLLM_SERVER_DEV_MODE=1
+# (set via infra.toml) exposes the /sleep + /wake_up endpoints on loopback.
+# overhead_gb is an UNMEASURED estimate — replace with a measured value after
+# the first real run (see docs/archive/serve-sizing-plan.md P2).
+[[model]]
+enable  = false
+slug    = "coder"
+name    = "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ"
+task    = "generate"
+memory  = 0.90
+maxlen  = 16384
+overhead_gb = 6.0           # estimate — measure on first run
+params  = "--quantization awq --enable-sleep-mode"
+sleep_level = 2             # 19 GB of weights — RAM can't hold them; NVMe reload
+sleep_ttl   = 900           # park 15 min after the last coder request
+weights = "~19 GB"          # AWQ 4-bit, fits one 32 GB card alone
+context = "32k"
