@@ -14,6 +14,7 @@ model_list:
       api_base: http://localhost:8008/chat/v1
       api_key: "dummy"            # vLLM ignores this unless you started it with --api-key
       cooldown_time: 0            # sole local deployment — never bench it (a cooldown would 503 every request)
+      order: 1                    # tried before the cloud backup below
 
   # --- Embeddings (Qwen3-Embedding-0.6B) ---
   # model must match vLLM's --served-model-name ("embed-sm" from models.toml), not the repo path.
@@ -66,33 +67,29 @@ model_list:
   #     api_base: http://localhost:8008/coder/v1
   #     api_key: "dummy"
 
-  # --- CLOUD BACKUP (disabled: add the API key to .env, then uncomment) ------------------
-  # Pattern: same model_name as the local deployment + higher `order`. LiteLLM tries
-  # order=1 (local vLLM) first; only when its retries are exhausted (connection refused,
-  # timeout, 429, 5xx) does it escalate to order=2. Clients keep calling "qwen-chat" and
-  # never know which backend served — check the response `model` field /
+  # --- CLOUD BACKUP -----------------------------------------------------------------------
+  # Same model_name as the local deployment + higher `order`. LiteLLM tries order=1
+  # (local vLLM) first; only when its retries are exhausted (connection refused,
+  # timeout, 429, 5xx) does it escalate to order=2. Clients keep calling "qwen-chat"
+  # and never know which backend served — check the response `model` field /
   # `x-litellm-model-api-base` header to detect cloud usage.
-  # - model_name: qwen-chat
-  #   litellm_params:
-  #     model: openai/gpt-4o-mini          # swap for your preferred backup model
-  #     api_key: os.environ/OPENAI_API_KEY
-  #     order: 2
-  #   model_info:
-  #     disable_background_health_check: true   # health probes are real billable calls
-  #
+  - model_name: qwen-chat
+    litellm_params:
+      model: anthropic/claude-haiku-4-5   # cheap+fast; 200K ctx also covers the context-window fallback
+      api_key: os.environ/ANTHROPIC_API_KEY
+      order: 2
+    model_info:
+      disable_background_health_check: true   # health probes are real billable calls
+
   # Wildcards: call ANY cloud model through this proxy (model="anthropic/claude-...").
-  # - model_name: "openai/*"
-  #   litellm_params:
-  #     model: "openai/*"
-  #     api_key: os.environ/OPENAI_API_KEY
-  # - model_name: "anthropic/*"
-  #   litellm_params:
-  #     model: "anthropic/*"
-  #     api_key: os.environ/ANTHROPIC_API_KEY
-  # - model_name: "gemini/*"
-  #   litellm_params:
-  #     model: "gemini/*"
-  #     api_key: os.environ/GEMINI_API_KEY
+  - model_name: "openai/*"
+    litellm_params:
+      model: "openai/*"
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: "anthropic/*"
+    litellm_params:
+      model: "anthropic/*"
+      api_key: os.environ/ANTHROPIC_API_KEY
 
 router_settings:
   num_retries: 2          # retries within a model group before any fallback/escalation
@@ -102,10 +99,11 @@ router_settings:
     ContentPolicyViolationErrorRetries: 0
     TimeoutErrorRetries: 1
     RateLimitErrorRetries: 2
-  # Uncomment with the cloud backup above — requests >maxlen route to a big-context
-  # cloud model instead of erroring (chat's local maxlen is 12288 right now):
-  # context_window_fallbacks: [{"qwen-chat": ["gpt-4o-mini"]}]
-  # default_fallbacks: ["gpt-4o-mini"]
+  # Requests >12288 tokens (chat's local maxlen) route to the 200K-context cloud
+  # model instead of erroring:
+  context_window_fallbacks: [{"qwen-chat": ["anthropic/claude-haiku-4-5"]}]
+  # No default_fallbacks: embeddings/rerank/audio have no same-shape cloud twin,
+  # and qwen-chat already fails over via `order`.
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY   # clients must send this as Bearer token
@@ -129,6 +127,6 @@ litellm_settings:
   json_logs: true         # structured logs (docker logs litellm | jq)
   request_timeout: 300    # hard cap per request; local models should never get close
   # Cloud spend cap, no Postgres needed (local hosted_vllm calls cost $0, so this
-  # effectively caps cloud-fallback spend). Uncomment with the cloud backup above:
-  # max_budget: 25        # USD
-  # budget_duration: 30d
+  # effectively caps cloud-fallback spend):
+  max_budget: 25        # USD
+  budget_duration: 30d
