@@ -20,14 +20,20 @@ co-run only if their reservations fit alongside what's already resident.
 """
 
 import os
+import re
 import sys
 import json
+import time
 import shutil
 import subprocess
 import tomllib
+from datetime import datetime, timezone
 from pathlib import Path
 
 CONFIG = Path(__file__).resolve().parent / "models.toml"
+# P2 (serve-sizing-plan.md): measured per-run stats, written by a detached recorder
+# forked at launch. Gitignored — values are gpu/vllm-version/config specific.
+RUNSTATS = Path(__file__).resolve().parent / ".runstats.json"
 # uv lives under ~/.local/bin which is NOT on systemd's stripped PATH, so call it
 # by absolute path. Override via the environment.
 UV = os.environ.get("UV", "/home/beans/.local/bin/uv")
@@ -122,7 +128,144 @@ def footprint(m):
     return weights, kv_per_token
 
 
+# ── Run-stats: measured capacity from real runs (P2) ─────────────────────────────
+def load_runstats():
+    try:
+        return json.loads(RUNSTATS.read_text())
+    except Exception:
+        return {}
+
+
+def measured_stats(m):
+    """The recorded run for this slug, or None if absent/stale (model or GPU changed)."""
+    rs = load_runstats().get(m["slug"])
+    if not rs or rs.get("name") != m["name"] or not rs.get("kv_tokens"):
+        return None
+    g = gpu_name()
+    if g and rs.get("gpu") and rs["gpu"] != g:
+        return None
+    return rs
+
+
+def unit_for_slug(slug):
+    """systemd unit name for a slug, from infra.toml ('./serve.py <slug>')."""
+    try:
+        with (CONFIG.parent / "infra.toml").open("rb") as f:
+            for svc in tomllib.load(f).get("service", []):
+                if svc.get("kind") == "systemd" and svc.get("exec_start", "").endswith(f"serve.py {slug}"):
+                    return svc["name"]
+    except Exception:
+        pass
+    return None
+
+
+def record_runstats(m, port, memory, launched_at):
+    """Runs in a detached child: wait for the server, scrape the journal, write stats.
+
+    Never raises past its caller (spawn_recorder wraps it); prints go to the unit's
+    journal tagged [runstats].
+    """
+    import urllib.request
+
+    deadline = time.time() + 900
+    while time.time() < deadline:
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=3)
+            break
+        except Exception:
+            time.sleep(10)
+    else:
+        print(f"[runstats] {m['slug']}: never became healthy — not recording", flush=True)
+        return
+    time.sleep(15)  # let the allocation settle
+
+    unit = unit_for_slug(m["slug"])
+    if not unit:
+        print(f"[runstats] {m['slug']}: no systemd unit in infra.toml — not recording", flush=True)
+        return
+    # --since launch time: only THIS boot's lines (a manual run logs to stdout, not
+    # the journal, and must not pick up a previous boot's numbers).
+    since = datetime.fromtimestamp(launched_at).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        out = subprocess.run(
+            ["journalctl", "-u", unit, "--since", since, "--no-pager", "-o", "cat"],
+            capture_output=True, text=True, timeout=30, check=True,
+        ).stdout
+    except Exception as e:
+        print(f"[runstats] {m['slug']}: journalctl failed ({e}) — not recording", flush=True)
+        return
+    tok = re.findall(r"GPU KV cache size:\s*([\d,]+)\s*tokens", out)
+    ver = re.findall(r"Initializing a V1 LLM engine \(v([^)]+)\)", out)
+    if not tok:
+        print(f"[runstats] {m['slug']}: no KV-cache line in journal — not recording", flush=True)
+        return
+    kv_tokens = int(tok[-1].replace(",", ""))
+
+    entry = {
+        "name": m["name"],
+        "gpu": gpu_name(),
+        "vllm": ver[-1] if ver else None,
+        "memory": memory,
+        "maxlen": m.get("maxlen"),
+        "kv_tokens": kv_tokens,
+        "recorded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    # Formula-implied overhead = claim − weights − tokens×KV/tok. Negative means the
+    # per-token formula overestimates (hybrid-attention models) — store null; the
+    # measured kv_tokens is the useful number there.
+    fp, gm = footprint(m), gpu_mem()
+    if fp and gm:
+        weights, kv_per_token = fp
+        oh = memory * gm[0] - weights - kv_tokens * kv_per_token
+        entry["overhead_gb_measured"] = round(oh / GiB, 2) if oh >= 0 else None
+
+    stats = load_runstats()
+    stats[m["slug"]] = entry
+    tmp = RUNSTATS.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(stats, indent=2) + "\n")
+    os.replace(tmp, RUNSTATS)
+    print(f"[runstats] {m['slug']}: recorded {kv_tokens:,} KV tokens "
+          f"(memory {memory}, vLLM {entry['vllm']})", flush=True)
+
+
+def spawn_recorder(m, port, memory):
+    """Double-fork a detached recorder so it survives the exec and isn't our child.
+
+    The main process still execs vLLM — the recorder sits beside it, never between
+    systemd and vLLM (see serve-sizing-plan.md P2).
+    """
+    launched_at = time.time()
+    try:
+        pid = os.fork()
+    except OSError:
+        return
+    if pid > 0:
+        os.waitpid(pid, 0)   # reap the intermediate child immediately
+        return
+    os.setsid()
+    if os.fork() > 0:
+        os._exit(0)
+    try:
+        record_runstats(m, int(port), float(memory), launched_at)
+    except Exception as e:
+        print(f"[runstats] recorder crashed: {e}", flush=True)
+    os._exit(0)
+
+
 # ── Live GPU state ───────────────────────────────────────────────────────────────
+def gpu_name():
+    """GPU 0's product name, or None."""
+    if not shutil.which("nvidia-smi"):
+        return None
+    try:
+        return subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader", "--id=0"],
+            capture_output=True, text=True, timeout=10, check=True,
+        ).stdout.strip().splitlines()[0]
+    except Exception:
+        return None
+
+
 def gpu_mem():
     """(total_bytes, free_bytes) for GPU 0, or None if nvidia-smi is unavailable."""
     if not shutil.which("nvidia-smi"):
@@ -141,6 +284,10 @@ def gpu_mem():
 
 # ── Fit math (shared by the check and --fit) ─────────────────────────────────────
 def overhead_bytes(defaults, m):
+    # Prefer the overhead measured from a real run (P2) over the configured guess.
+    rs = measured_stats(m)
+    if rs and rs.get("overhead_gb_measured") is not None:
+        return float(rs["overhead_gb_measured"]) * GiB
     return float(m.get("overhead_gb", defaults.get("overhead_gb", DEFAULT_OVERHEAD_GB))) * GiB
 
 
@@ -159,6 +306,27 @@ def check_fit(defaults, m):
 
     'skip' = couldn't derive footprint or read the GPU; proceed without blocking.
     """
+    need_tok = required_tokens(m)
+    # P2 fast path: a real run with this exact config already told us the capacity.
+    # (Formula-based prediction is badly wrong for hybrid-attention models — chat's
+    # formula says ~13k tokens, measured is ~299k — so measured truth wins.)
+    rs = measured_stats(m)
+    if rs and rs.get("memory") == m["memory"] and need_tok:
+        gm = gpu_mem()
+        if gm:
+            total, free = gm
+            claim = m["memory"] * total
+            detail = (f"{m['slug']}: measured {rs['kv_tokens']:,} KV tokens at memory={m['memory']} "
+                      f"(recorded {rs['recorded_at'][:10]}, vLLM {rs.get('vllm')}); "
+                      f"free {human(free)} of {human(total)}")
+            if claim > free:
+                return "fail", (f"{detail}\n  memory={m['memory']} wants {human(claim)} but only "
+                                f"{human(free)} free — vLLM would OOM on load. Lower memory, or free the card.")
+            if rs["kv_tokens"] < need_tok * (1 - FIT_TOLERANCE):
+                return "fail", (f"{detail}\n  need {need_tok:,} (maxlen) — raise memory, "
+                                f"add fp8 KV, or lower maxlen.")
+            return "ok", f"{detail}\n  ≥ {need_tok:,} needed ✓"
+
     fp = footprint(m)
     if fp is None:
         return "skip", f"{m['slug']}: footprint not derivable (not cached yet?) — skipping fit check"
@@ -226,13 +394,17 @@ def fmt_list(defaults, models):
         fp = footprint(m)
         w = human(fp[0]) if fp else (str(m.get("weights", "?")))
         pred = "?"
-        if fp and m.get("memory") and (gm := gpu_mem()):
+        rs = measured_stats(m)
+        if rs and rs.get("memory") == m.get("memory"):
+            pred = f"{rs['kv_tokens']:,}*"          # * = measured from a real run
+        elif fp and m.get("memory") and (gm := gpu_mem()):
             pred = f"~{predict_tokens(m['memory'] * gm[0], fp[0], fp[1], overhead_bytes(defaults, m)):,}"
         print(
             f"{m['slug']:<7} {m['name']:<40} {('yes' if m.get('enable') else 'no'):<3} "
             f"{m['memory']:<5} {m['task']:<9} {str(m.get('maxlen') or 'default'):<8} {w:<9} {pred}"
         )
-    print("\nPRED-KV-TOK = KV tokens the configured memory yields given current free VRAM.")
+    print("\nPRED-KV-TOK = KV tokens the configured memory yields (* = measured from a real")
+    print("run via .runstats.json; ~ = formula estimate given current free VRAM).")
     print("A unit refuses to start if its prediction is below maxlen (run with --fit to auto-size).")
 
 
@@ -281,6 +453,8 @@ def launch(defaults, m, fit=False):
 
     print(f"[+] '{m['slug']}' → {m['name']}  on {bind_host}:{port}  (gpu-mem {memory})")
     print(f"[+] {' '.join(cmd)}")
+    # P2: detached recorder scrapes this run's real KV capacity into .runstats.json.
+    spawn_recorder(m, port, memory)
     # exec (replace this process) so Ctrl-C / systemd signals reach vllm directly.
     os.execvp(cmd[0], cmd)
 

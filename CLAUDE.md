@@ -131,8 +131,10 @@ to **< ~0.95**; `serve.py`'s launch-time fit check enforces reality (see
   activation steps in `docs/wake-proxy.md` (first boot needs the card free).
 - Cloud fallback + budget blocks in `llm-config.yml` are commented until a cloud API key
   lands in `.env`.
-- P2 of `docs/archive/serve-sizing-plan.md` (record real runs → learn `overhead_gb`)
-  is not yet implemented.
+- P2 of `docs/archive/serve-sizing-plan.md` is implemented: serve.py forks a detached
+  recorder at launch that scrapes the run's real KV capacity from the journal into
+  `.runstats.json` (gitignored); fit checks and `--list` prefer measured values
+  (`*` marker) over the formula, which badly underestimates hybrid-attention models.
 - Optional next steps live as comments: fp8 KV on chat (doubles context), Postgres +
   LiteLLM spend UI, ComfyUI image gen (on-demand only), embed/rerank on CPU via
   Infinity if coder-vs-embeddings contention ever matters.
