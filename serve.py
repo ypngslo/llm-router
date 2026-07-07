@@ -100,6 +100,9 @@ def footprint(m):
         return None
 
     cfg = json.loads((snap / "config.json").read_text())
+    # Multimodal models (e.g. Qwen3.5) nest the LM params under text_config;
+    # merge them up so the KV math below sees them.
+    cfg = {**cfg, **cfg.get("text_config", {})}
     layers = cfg.get("num_hidden_layers")
     kv_heads = cfg.get("num_key_value_heads") or cfg.get("num_attention_heads")
     head_dim = cfg.get("head_dim")

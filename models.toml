@@ -37,21 +37,21 @@ slug    = "chat"            # vLLM --served-model-name; llm-config.yml must matc
 name    = "Qwen/Qwen3.5-4B" # HF repo id
 task    = "generate"
 memory  = 0.55
-# 6144 = what 0.55 actually delivers as KV (measured: 387 blocks × 16 = 6,192 tok,
-# co-resident with embed). The old 32768 was unreachable — vLLM only had ~6k of cache.
-# Raise this only by raising memory and/or adding fp8 KV (see serve-sizing-plan.md).
-maxlen  = 6144
+# 12288 = 2× the measured bf16 ceiling (387 blocks × 16 = 6,192 tok at 144 KB/tok,
+# co-resident with embed): --kv-cache-dtype fp8 halves KV to 72 KB/tok, doubling
+# the tokens the same 0.55 delivers. Raise further only by raising memory.
+maxlen  = 12288
 # overhead_gb: VRAM vLLM reserves beyond weights+KV (activations/CUDA graphs/profiling).
 # Measured ~8 GiB for this model at 32k; serve.py uses it for the launch fit check.
 overhead_gb = 8.0
-params  = "--reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_xml --enable-sleep-mode"
+# fp8 KV: halves KV bytes/token (144→72 KB). Accuracy is fine at these lengths —
+# documented fp8-KV degradation starts well past 32k. serve.py's fit math halves
+# its KV estimate when it sees kv-cache-dtype fp8 in params.
+params  = "--reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_xml --enable-sleep-mode --kv-cache-dtype fp8"
 sleep_level = 2             # 8 GB of weights won't fit the box's spare RAM; reload from NVMe
 sleep_ttl   = 0             # stay awake; only slept when coder needs the card
 weights = "~8 GB"           # bf16 weights (informational, shown in --list)
-context = "32k"
-# Optional upgrade: "--kv-cache-dtype fp8" halves KV bytes/token → roughly doubles
-# the maxlen this memory fraction can deliver (6144 → ~12k). Accuracy is fine at
-# chat lengths; documented degradation is mostly >32k. Benchmark after enabling.             # model's native context window (informational)
+context = "32k"             # model's native context window (informational)
 
 # --- Embeddings (Qwen3-Embedding-4B) -----------------------------------------
 # maxlen caps KV-cache size; embeddings work on short chunks so 4096 is plenty.
