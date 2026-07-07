@@ -1,34 +1,134 @@
 model_list:
-  # --- Chat (Qwen3.5-4B) ---
+  # vLLM models route via waker.py (:8008), the sleep-aware proxy: api_base is
+  # http://localhost:8008/<slug>/v1 where <slug> matches models.toml. The waker
+  # wakes the target model on demand (sleeping idle ones if the card is full) and
+  # streams the request through — clients just see a slow first token after a swap.
+
+  # --- Chat + vision (Qwen3.5-4B) ---
+  # model must match vLLM's --served-model-name ("chat" from models.toml), not the repo path.
+  # Qwen3.5-4B is natively multimodal: this endpoint accepts image_url content parts
+  # (verified 2026-07) — no separate vision model needed.
   - model_name: qwen-chat
     litellm_params:
-      model: hosted_vllm/Qwen/Qwen3.5-4B
-      api_base: http://host.docker.internal:8001/v1
+      model: hosted_vllm/chat
+      api_base: http://localhost:8008/chat/v1
       api_key: "dummy"            # vLLM ignores this unless you started it with --api-key
+      cooldown_time: 0            # sole local deployment — never bench it (a cooldown would 503 every request)
 
-  # --- Embeddings ---
+  # --- Embeddings (Qwen3-Embedding-0.6B) ---
+  # model must match vLLM's --served-model-name ("embed-sm" from models.toml), not the repo path.
   - model_name: embeddings
     litellm_params:
-      model: hosted_vllm/your-embedding-model
-      api_base: http://host.docker.internal:8002/v1
+      model: hosted_vllm/embed-sm
+      api_base: http://localhost:8008/embed-sm/v1
       api_key: "dummy"
+      cooldown_time: 0
+    model_info:
+      mode: embedding
 
-  # --- Code (Qwen2.5-Coder-32B) ---
-  - model_name: qwen-coder
+  # --- Reranker (Qwen3-Reranker-0.6B) ---
+  # Serves /rerank (Cohere-style), not /chat or /embeddings. model must match
+  # vLLM's --served-model-name ("rerank" from models.toml), not the repo path.
+  - model_name: rerank
     litellm_params:
-      model: hosted_vllm/Qwen/Qwen2.5-Coder-32B-Instruct
-      api_base: http://host.docker.internal:8003/v1
+      model: hosted_vllm/rerank
+      api_base: http://localhost:8008/rerank/v1
       api_key: "dummy"
+      cooldown_time: 0
 
-  # --- Vision (uncomment once you serve a VL model for the image API) ---
-  # - model_name: qwen-vision
+  # --- Speech-to-text (Parakeet TDT 0.6B v3, CPU int8 container on :8005) ---
+  # OpenAI /v1/audio/transcriptions. Runs on CPU (~30x realtime) — zero VRAM.
+  - model_name: transcribe
+    litellm_params:
+      model: openai/parakeet-tdt-0.6b-v3
+      api_base: http://localhost:8005/v1
+      api_key: "dummy"
+    model_info:
+      mode: audio_transcription
+
+  # --- Text-to-speech (Kokoro-82M, CPU container on :8006) ---
+  # OpenAI /v1/audio/speech. voice: af_bella, af_sky, ... (or weighted mixes "af_bella(2)+af_sky(1)").
+  - model_name: tts
+    litellm_params:
+      model: openai/kokoro
+      api_base: http://localhost:8006/v1
+      api_key: "dummy"
+    model_info:
+      mode: audio_speech
+
+  # --- Code (Qwen2.5-Coder-32B-AWQ) — disabled; enable with the coder unit (see docs/wake-proxy.md) ---
+  # model must match vLLM's --served-model-name ("coder" from models.toml), not the repo path.
+  # Once enabled, the waker swaps it in on demand: request arrives → chat is slept →
+  # coder wakes (seconds) → response streams. No manual switching.
+  # - model_name: qwen-coder
   #   litellm_params:
-  #     model: hosted_vllm/Qwen/Qwen2.5-VL-7B-Instruct
-  #     api_base: http://host.docker.internal:8004/v1
+  #     model: hosted_vllm/coder
+  #     api_base: http://localhost:8008/coder/v1
   #     api_key: "dummy"
+
+  # --- CLOUD BACKUP (disabled: add the API key to .env, then uncomment) ------------------
+  # Pattern: same model_name as the local deployment + higher `order`. LiteLLM tries
+  # order=1 (local vLLM) first; only when its retries are exhausted (connection refused,
+  # timeout, 429, 5xx) does it escalate to order=2. Clients keep calling "qwen-chat" and
+  # never know which backend served — check the response `model` field /
+  # `x-litellm-model-api-base` header to detect cloud usage.
+  # - model_name: qwen-chat
+  #   litellm_params:
+  #     model: openai/gpt-4o-mini          # swap for your preferred backup model
+  #     api_key: os.environ/OPENAI_API_KEY
+  #     order: 2
+  #   model_info:
+  #     disable_background_health_check: true   # health probes are real billable calls
+  #
+  # Wildcards: call ANY cloud model through this proxy (model="anthropic/claude-...").
+  # - model_name: "openai/*"
+  #   litellm_params:
+  #     model: "openai/*"
+  #     api_key: os.environ/OPENAI_API_KEY
+  # - model_name: "anthropic/*"
+  #   litellm_params:
+  #     model: "anthropic/*"
+  #     api_key: os.environ/ANTHROPIC_API_KEY
+  # - model_name: "gemini/*"
+  #   litellm_params:
+  #     model: "gemini/*"
+  #     api_key: os.environ/GEMINI_API_KEY
+
+router_settings:
+  num_retries: 2          # retries within a model group before any fallback/escalation
+  retry_policy:           # don't burn retries on errors that can never succeed
+    BadRequestErrorRetries: 0
+    AuthenticationErrorRetries: 0
+    ContentPolicyViolationErrorRetries: 0
+    TimeoutErrorRetries: 1
+    RateLimitErrorRetries: 2
+  # Uncomment with the cloud backup above — requests >maxlen route to a big-context
+  # cloud model instead of erroring (chat's local maxlen is 6144 right now):
+  # context_window_fallbacks: [{"qwen-chat": ["gpt-4o-mini"]}]
+  # default_fallbacks: ["gpt-4o-mini"]
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY   # clients must send this as Bearer token
+  # Virtual keys / budgets / rate limits / spend logs — the `litellm` DB in the shared
+  # postgres from ../llm-observability (127.0.0.1:8009). Prisma creates the schema on
+  # first boot. Issue per-app keys with POST /key/generate {"rpm_limit":..., "tpm_limit":...,
+  # "max_budget":...} instead of handing out the master key — that's also what makes
+  # Langfuse traces attributable per app.
+  database_url: os.environ/DATABASE_URL
+  store_model_in_db: false  # this file stays the source of truth for the model list
 
 litellm_settings:
-  drop_params: true     # silently drop unsupported params instead of erroring
+  drop_params: true       # silently drop unsupported params instead of erroring
+  # Trace every request/failure to Langfuse (../llm-observability, 127.0.0.1:3000).
+  # Async batched callback — off the request hot path; harmless if Langfuse is down.
+  success_callback: ["langfuse"]
+  failure_callback: ["langfuse"]
+  # Tag every trace with the calling key's alias (+ user when callers pass "user"),
+  # so the Langfuse dashboard is sliceable per app instead of one anonymous blob.
+  langfuse_default_tags: ["user_api_key_alias", "user_api_key_user_id"]
+  json_logs: true         # structured logs (docker logs litellm | jq)
+  request_timeout: 300    # hard cap per request; local models should never get close
+  # Cloud spend cap, no Postgres needed (local hosted_vllm calls cost $0, so this
+  # effectively caps cloud-fallback spend). Uncomment with the cloud backup above:
+  # max_budget: 25        # USD
+  # budget_duration: 30d

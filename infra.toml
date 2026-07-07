@@ -2,14 +2,16 @@
 # Register from this dir:  uv run --project ~/code/system/server-infra/cli infra register
 # Field reference: ~/code/system/server-infra/docs/infra-config.md
 #
-# Topology: `litellm` is the front door (the router). The three `vllm-*` entries are the
-# model servers it proxies to over the docker bridge (host.docker.internal). They run on the
-# HOST because they own the GPU.
+# Topology: `litellm` is the front door (the router). The `vllm-*` entries are the model
+# servers it proxies to over host loopback (litellm runs with network_mode: host). They run
+# on the HOST because they own the GPU. `parakeet`/`kokoro` are CPU audio containers litellm
+# also fronts; `docling` is a document-conversion API with its own Caddy route.
 #
-# VRAM CAVEAT — infra cannot express the GPU budget. Registering all three only RESERVES their
-# ports + renders their units; it does NOT mean run all three. Only `infra enable` a combination
-# that fits one 32GB card: chat (0.35) + embed (0.15) co-run; coder (0.90) runs solo.
-# (`./serve.sh --list` prints the budget.)
+# VRAM CAVEAT — infra cannot express the GPU budget. Registering a service only RESERVES its
+# port + renders its unit; it does NOT mean run it. Only `infra enable` a combination that
+# fits one 32GB card: chat (0.55) + embed-sm (0.10) + rerank (0.10) co-run; coder (0.90)
+# runs solo — see docs/coder-sleep-mode.md and ./swap.sh. (`./serve.py --list` prints the
+# budget.) docling on GPU adds ~5 GB and co-fits with the trio but not with coder.
 
 # ── Front door: LiteLLM proxy (container) ──────────────────────────────────────────────────
 [[service]]
@@ -23,33 +25,108 @@ service = "litellm"          # the service name inside docker-compose.yml
 port = 4000                  # pinned: the compose publishes 127.0.0.1:4000 and llm-config assumes it
 
 # ── Model servers: vLLM on the host (systemd) ──────────────────────────────────────────────
-# exec_start args are kept verbatim, so one serve.sh drives all three. infra bakes
-# Environment=PORT=<port>, which serve.sh now honors (see INFRA_PORT in serve.sh).
+# exec_start args are kept verbatim, so one serve.py drives all three. infra bakes
+# Environment=PORT=<port>, which serve.py reads from the env (see launch() in serve.py).
 # reach = "host": no Caddy route — only litellm reaches these, via host.docker.internal.
+
+# VLLM_SERVER_DEV_MODE=1 on every vLLM unit exposes the /sleep, /wake_up and
+# /is_sleeping endpoints (loopback-only, so "dev mode" is fine here). waker.py
+# drives them; models.toml carries the matching --enable-sleep-mode params.
 
 [[service]]
 name = "vllm-chat"
 role = "backend"             # 8000–8099, matching the ports these already use
 reach = "host"
 kind = "systemd"
-exec_start = "./serve.sh chat"
+exec_start = "./serve.py chat"
 working_dir = "."
 port = 8001
+environment = { VLLM_SERVER_DEV_MODE = "1" }
 
 [[service]]
 name = "vllm-embed"
 role = "backend"
 reach = "host"
 kind = "systemd"
-exec_start = "./serve.sh embed"
+exec_start = "./serve.py embed-sm"
 working_dir = "."
 port = 8002
+environment = { VLLM_SERVER_DEV_MODE = "1" }
+
+[[service]]
+name = "vllm-rerank"
+role = "backend"
+reach = "host"
+kind = "systemd"
+exec_start = "./serve.py rerank"
+working_dir = "."
+port = 8004
+environment = { VLLM_SERVER_DEV_MODE = "1" }
+
+# ── Wake proxy: sleep-aware router between litellm and the vLLM backends ──────────────────
+# litellm's api_bases point here (http://localhost:8008/<slug>/v1). On demand it wakes the
+# requested model, first putting idle ones to sleep if the card can't hold both. uv by
+# absolute path (needs the repo venv for aiohttp; systemd PATH doesn't have uv).
+[[service]]
+name = "waker"
+role = "backend"
+reach = "host"
+kind = "systemd"
+exec_start = "/home/beans/.local/bin/uv run --project /home/beans/code/system/llm-router waker.py"
+working_dir = "."
+port = 8008
 
 [[service]]
 name = "vllm-coder"
 role = "backend"
 reach = "host"
 kind = "systemd"
-exec_start = "./serve.sh coder"
+exec_start = "./serve.py coder"
 working_dir = "."
 port = 8003
+environment = { VLLM_SERVER_DEV_MODE = "1" }
+
+# ── Audio + documents: sibling containers in ./docker-compose.yml ───────────────────────────
+# parakeet/kokoro are OpenAI-compatible and fronted by litellm (reach = "host", like the
+# vLLM backends). docling is NOT an OpenAI API, so it gets its own Caddy route.
+
+[[service]]
+name = "parakeet"            # speech-to-text (NVIDIA Parakeet TDT 0.6B v3, CPU int8)
+role = "backend"
+reach = "host"
+kind = "compose"
+compose_file = "./docker-compose.yml"
+service = "parakeet"
+port = 8005                  # pinned: compose publishes 127.0.0.1:8005 and llm-config assumes it
+
+[[service]]
+name = "kokoro"              # text-to-speech (Kokoro-82M, CPU)
+role = "backend"
+reach = "host"
+kind = "compose"
+compose_file = "./docker-compose.yml"
+service = "kokoro"
+port = 8006                  # pinned: compose publishes 127.0.0.1:8006 and llm-config assumes it
+
+[[service]]
+name = "docling"             # document conversion API (docling-serve, GPU)
+role = "backend"
+reach = "tailnet"            # own Caddy route — docling is not an LLM API, litellm can't front it
+path = "/docling"
+kind = "compose"
+compose_file = "./docker-compose.yml"
+service = "docling"
+port = 8007                  # pinned: bound by WAKER (passthrough listener) — the actual
+                             # container publishes 127.0.0.1:8011 (docling-app below) and
+                             # waker.py docker-starts/-stops it on demand ([[container]] in
+                             # models.toml). Caddy + clients keep using 8007 and never see
+                             # the lifecycle.
+
+[[service]]
+name = "docling-app"         # the REAL docling container behind the waker — port
+role = "backend"             # reservation for 8011 (reach=host, never routed)
+reach = "host"
+kind = "compose"
+compose_file = "./docker-compose.yml"
+service = "docling"
+port = 8011
