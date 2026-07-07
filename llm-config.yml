@@ -103,7 +103,7 @@ router_settings:
     TimeoutErrorRetries: 1
     RateLimitErrorRetries: 2
   # Uncomment with the cloud backup above — requests >maxlen route to a big-context
-  # cloud model instead of erroring (chat's local maxlen is 6144 right now):
+  # cloud model instead of erroring (chat's local maxlen is 12288 right now):
   # context_window_fallbacks: [{"qwen-chat": ["gpt-4o-mini"]}]
   # default_fallbacks: ["gpt-4o-mini"]
 
