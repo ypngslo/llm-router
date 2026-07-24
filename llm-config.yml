@@ -75,9 +75,20 @@ model_list:
   # `x-litellm-model-api-base` header to detect cloud usage.
   - model_name: qwen-chat
     litellm_params:
-      model: anthropic/claude-haiku-4-5   # cheap+fast; 200K ctx also covers the context-window fallback
-      api_key: os.environ/ANTHROPIC_API_KEY
+      model: openrouter/deepseek/deepseek-v4-pro   # same backend as deepseek-pro — 1M ctx, so failover and context overflow land in one place
+      api_key: os.environ/OPENROUTER_API_KEY
       order: 2
+    model_info:
+      disable_background_health_check: true   # health probes are real billable calls
+
+  # --- DeepSeek V4 Pro via OpenRouter (1M context) ------------------------------------
+  # The big-context escape hatch for agent traffic: qwen-chat context overflows route
+  # here (see context_window_fallbacks), and Hermes users can pick it explicitly with
+  # /model deepseek-pro.
+  - model_name: deepseek-pro
+    litellm_params:
+      model: openrouter/deepseek/deepseek-v4-pro
+      api_key: os.environ/OPENROUTER_API_KEY
     model_info:
       disable_background_health_check: true   # health probes are real billable calls
 
@@ -99,9 +110,9 @@ router_settings:
     ContentPolicyViolationErrorRetries: 0
     TimeoutErrorRetries: 1
     RateLimitErrorRetries: 2
-  # Requests >12288 tokens (chat's local maxlen) route to the 200K-context cloud
-  # model instead of erroring:
-  context_window_fallbacks: [{"qwen-chat": ["anthropic/claude-haiku-4-5"]}]
+  # Requests over chat's local maxlen (65536: Qwen3.5-9B-FP8) route to the
+  # 1M-context cloud model instead of erroring:
+  context_window_fallbacks: [{"qwen-chat": ["deepseek-pro"]}]
   # No default_fallbacks: embeddings/rerank/audio have no same-shape cloud twin,
   # and qwen-chat already fails over via `order`.
 

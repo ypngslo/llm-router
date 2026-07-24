@@ -34,8 +34,8 @@ docling clients ──X-Api-Key──▶ Caddy /docling ──▶ :8007 waker pa
 - **LiteLLM** runs as a Docker container with `network_mode: host`, binds 127.0.0.1:4000
   only (per infra, only Caddy listens publicly), and mounts `llm-config.yml` read-only.
   Router hardening (retries, retry_policy, cooldown_time: 0 on local deployments) lives in
-  that file, plus a **commented CLOUD BACKUP block**: uncomment + add a key to `.env` to get
-  transparent local→cloud failover (same `model_name`, `order: 2`).
+  that file, plus an active **CLOUD BACKUP block**: transparent local→cloud failover to
+  DeepSeek V4 Pro via OpenRouter (same `model_name`, `order: 2`).
 - **vLLM servers** are host systemd units. `serve.py <slug>` launches one model defined in
   `models.toml`; before exec'ing vLLM it derives the model's footprint (weights from the HF
   cache, KV/token from config.json), checks live free VRAM, and **refuses to start** if the
@@ -129,8 +129,8 @@ to **< ~0.95**; `serve.py`'s launch-time fit check enforces reality (see
 
 - `coder` is fully wired for on-demand swapping via waker.py but `enable = false`;
   activation steps in `docs/wake-proxy.md` (first boot needs the card free).
-- Cloud fallback + budget blocks in `llm-config.yml` are commented until a cloud API key
-  lands in `.env`.
+- Cloud fallback is live: `qwen-chat` fails over to DeepSeek V4 Pro via OpenRouter
+  (`order: 2`), which is also the `context_window_fallbacks` target.
 - P2 of `docs/archive/serve-sizing-plan.md` is implemented: serve.py forks a detached
   recorder at launch that scrapes the run's real KV capacity from the journal into
   `.runstats.json` (gitignored); fit checks and `--list` prefer measured values
