@@ -64,25 +64,11 @@ bigger is swapped in and out automatically — that's the interesting part.
 
 ## Architecture
 
-```
-client ──Bearer key──▶ LiteLLM (container, 127.0.0.1:4000)
-                           │  routes by model_name; retries; cloud failover
-                           ├─ qwen-chat ─┐
-                           ├─ embeddings ┤  waker.py :8008 — sleep-aware proxy.
-                           ├─ rerank ────┤  Wakes the target vLLM server, parking
-                           ├─ qwen-coder ┘  idle ones first if the card is full.
-                           │                  ├─ :8001 chat    Qwen3.5-9B (0.62)
-                           │                  ├─ :8002 embed   Qwen3-Emb-0.6B (0.10)
-                           │                  ├─ :8004 rerank  Qwen3-Rerank-0.6B (0.10)
-                           │                  └─ :8003 coder   Qwen2.5-32B-AWQ (0.90)
-                           ├─ transcribe ──▶ :8005 parakeet STT (CPU container)
-                           ├─ tts ─────────▶ :8006 kokoro TTS (CPU container)
-                           └─ deepseek-*, wildcards ──▶ OpenRouter / cloud APIs
+<img src="docs/architecture.svg" alt="Architecture map: apps call LiteLLM on :4000, which proxies GPU models through the waker scheduler (:8008) to vLLM tenants sharing one 32 GB RTX 5090 under a 0.92 VRAM budget — the ledger shows chat 0.62 + embeddings 0.10 + rerank 0.10 resident, with the 0.90 coder swapped in solo on demand. Audio goes to CPU containers, docling enters via Caddy through a waker passthrough with docker start/stop, and exhausted local retries or over-64K contexts escalate to OpenRouter under a $25/30-day cap." width="100%">
 
-docling clients ──X-Api-Key──▶ Caddy /docling ──▶ :8007 waker passthrough
-                                                    └─▶ :8011 docling container
-                                                        (docker start/stop on demand)
-```
+The map above is the whole system: the front door never knows the GPU exists,
+the scheduler only ever manages GPU tenants, and the VRAM ledger at the right
+is the invariant everything else exists to protect.
 
 Three layers, each doing one job:
 

@@ -1,0 +1,166 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 820" role="img"
+     aria-label="Architecture map: apps call LiteLLM on port 4000, which routes GPU models through the waker scheduler to vLLM tenants sharing one 32 GB RTX 5090 under a 0.92 VRAM budget, sends audio to CPU containers, and fails over to OpenRouter cloud under a spend cap.">
+  <title>llm-router — one endpoint, one 32 GB GPU, time-shared</title>
+  <defs>
+    <marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7E93B8"/>
+    </marker>
+    <marker id="arw-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4ED9A4"/>
+    </marker>
+    <marker id="arw-cyan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#56C8DD"/>
+    </marker>
+    <marker id="arw-violet" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#A98BEA"/>
+    </marker>
+  </defs>
+
+  <!-- canvas -->
+  <rect x="0" y="0" width="1240" height="820" rx="14" fill="#0D1526"/>
+
+  <!-- title -->
+  <text x="36" y="46" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="21" font-weight="700" fill="#E8EEF9">llm-router</text>
+  <text x="36" y="68" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="12" fill="#93A6C6">one OpenAI-compatible endpoint · every model · one 32 GB GPU, time-shared</text>
+
+  <!-- ══ clients ══ -->
+  <rect x="40" y="200" width="150" height="90" rx="10" fill="#131E33" stroke="#2C3D5C"/>
+  <text x="56" y="228" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="12.5" font-weight="700" fill="#E8EEF9">your apps</text>
+  <text x="56" y="247" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10" fill="#93A6C6">agents · RAG · pipelines</text>
+  <text x="56" y="263" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10" fill="#93A6C6">any OpenAI SDK</text>
+
+  <!-- ══ litellm ══ -->
+  <rect x="250" y="150" width="210" height="260" rx="10" fill="#131E33" stroke="#3B5AA0"/>
+  <text x="266" y="180" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="13" font-weight="700" fill="#6FA1F2">LiteLLM · :4000</text>
+  <text x="266" y="199" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10.5" fill="#93A6C6">the front door — one OpenAI API</text>
+  <text x="266" y="230" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10.5" fill="#C7D4EA">· master key + per-app virtual keys</text>
+  <text x="266" y="252" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10.5" fill="#C7D4EA">· retries · cooldown · fallback policy</text>
+  <text x="266" y="274" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10.5" fill="#C7D4EA">· context fallback (64K → 1M cloud)</text>
+  <text x="266" y="296" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10.5" fill="#C7D4EA">· spend logs + traces → Langfuse</text>
+  <text x="266" y="318" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10.5" fill="#C7D4EA">· routes by model_name — local first,</text>
+  <text x="274" y="336" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10.5" fill="#C7D4EA">cloud only when local is exhausted</text>
+  <text x="266" y="390" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="9.5" fill="#64748B">binds 127.0.0.1 · only the HTTPS edge is public</text>
+
+  <!-- ══ docling ingress ══ -->
+  <rect x="560" y="24" width="190" height="56" rx="10" fill="#131E33" stroke="#2C3D5C"/>
+  <text x="576" y="47" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="12" font-weight="700" fill="#E8EEF9">docling clients</text>
+  <text x="576" y="65" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="9.5" fill="#93A6C6">Caddy /docling · X-Api-Key</text>
+
+  <!-- ══ waker ══ -->
+  <rect x="540" y="110" width="230" height="250" rx="10" fill="#131E33" stroke="#9A7434"/>
+  <text x="556" y="140" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="13" font-weight="700" fill="#F0B562">waker.py · :8008</text>
+  <text x="556" y="159" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10.5" fill="#93A6C6">the sleep-aware GPU scheduler</text>
+  <text x="556" y="190" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10.5" fill="#C7D4EA"><tspan fill="#F0B562" font-weight="700">1</tspan>  target asleep? check the budget</text>
+  <text x="556" y="212" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10.5" fill="#C7D4EA"><tspan fill="#F0B562" font-weight="700">2</tspan>  evict idle models — LRU first</text>
+  <text x="556" y="234" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10.5" fill="#C7D4EA"><tspan fill="#F0B562" font-weight="700">3</tspan>  wake · reload weights (level 2)</text>
+  <text x="556" y="256" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10.5" fill="#C7D4EA"><tspan fill="#F0B562" font-weight="700">4</tspan>  stream — client sees slow TTFT</text>
+  <text x="556" y="290" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="9.5" fill="#64748B">never evicts mid-request · 60 s grace</text>
+  <text x="556" y="306" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="9.5" fill="#64748B">reaper parks idle models past their TTL</text>
+
+  <!-- ══ GPU panel ══ -->
+  <rect x="820" y="70" width="384" height="450" rx="12" fill="#101A2E" stroke="#33466B"/>
+  <text x="836" y="98" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="11" letter-spacing="1.5" fill="#93A6C6">ONE RTX 5090 · 32 GB VRAM</text>
+
+  <!-- tenant rows -->
+  <rect x="836" y="112" width="352" height="44" rx="8" fill="#1A2740" stroke="#2E8B6B"/>
+  <text x="848" y="131" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" font-weight="700" fill="#E8EEF9">chat  :8001</text>
+  <text x="848" y="147" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10" fill="#93A6C6">Qwen3.5-9B · FP8 · 64K ctx · vision</text>
+  <text x="1176" y="132" text-anchor="end" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="13" font-weight="700" fill="#4ED9A4">0.62</text>
+  <text x="1176" y="147" text-anchor="end" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="9" fill="#4ED9A4">resident</text>
+
+  <rect x="836" y="164" width="352" height="44" rx="8" fill="#1A2740" stroke="#2E8B6B"/>
+  <text x="848" y="183" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" font-weight="700" fill="#E8EEF9">embed-sm  :8002</text>
+  <text x="848" y="199" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10" fill="#93A6C6">Qwen3-Embedding-0.6B</text>
+  <text x="1176" y="184" text-anchor="end" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="13" font-weight="700" fill="#4ED9A4">0.10</text>
+  <text x="1176" y="199" text-anchor="end" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="9" fill="#4ED9A4">resident</text>
+
+  <rect x="836" y="216" width="352" height="44" rx="8" fill="#1A2740" stroke="#2E8B6B"/>
+  <text x="848" y="235" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" font-weight="700" fill="#E8EEF9">rerank  :8004</text>
+  <text x="848" y="251" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10" fill="#93A6C6">Qwen3-Reranker-0.6B</text>
+  <text x="1176" y="236" text-anchor="end" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="13" font-weight="700" fill="#4ED9A4">0.10</text>
+  <text x="1176" y="251" text-anchor="end" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="9" fill="#4ED9A4">resident</text>
+
+  <rect x="836" y="268" width="352" height="44" rx="8" fill="#141F35" stroke="#5B6B8C" stroke-dasharray="5 4"/>
+  <text x="848" y="287" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" font-weight="700" fill="#AAB9D4">coder  :8003</text>
+  <text x="848" y="303" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10" fill="#7E93B8">Qwen2.5-Coder-32B AWQ</text>
+  <text x="1176" y="288" text-anchor="end" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="13" font-weight="700" fill="#AAB9D4">0.90</text>
+  <text x="1176" y="303" text-anchor="end" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="9" fill="#7E93B8">parked · wakes solo</text>
+
+  <rect x="836" y="320" width="352" height="44" rx="8" fill="#141F35" stroke="#3E7C8A" stroke-dasharray="5 4"/>
+  <text x="848" y="339" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" font-weight="700" fill="#AAB9D4">docling  :8011</text>
+  <text x="848" y="355" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10" fill="#7E93B8">docling-serve · GPU container</text>
+  <text x="1176" y="340" text-anchor="end" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="13" font-weight="700" fill="#56C8DD">0.16</text>
+  <text x="1176" y="355" text-anchor="end" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="9" fill="#56C8DD">docker start / stop</text>
+
+  <!-- VRAM ledger -->
+  <text x="836" y="392" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="10" letter-spacing="1.5" fill="#93A6C6">VRAM LEDGER — FRACTION OF THE CARD</text>
+
+  <!-- bar A: steady state -->
+  <rect x="836" y="402" width="352" height="22" rx="4" fill="#0B1220"/>
+  <rect x="836" y="402" width="218" height="22" rx="4" fill="#2E8B6B"/>
+  <rect x="1054" y="402" width="35" height="22" fill="#3E7CA0"/>
+  <rect x="1089" y="402" width="35" height="22" fill="#3B5AA0"/>
+  <text x="945" y="417" text-anchor="middle" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" font-weight="700" fill="#E8EEF9">chat .62</text>
+  <text x="1071" y="417" text-anchor="middle" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#DCE6F5">.10</text>
+  <text x="1106" y="417" text-anchor="middle" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#DCE6F5">.10</text>
+  <text x="836" y="442" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10" fill="#93A6C6">steady state — the trio co-resides at 0.82</text>
+
+  <!-- bar B: coder swapped in -->
+  <rect x="836" y="458" width="352" height="22" rx="4" fill="#0B1220"/>
+  <rect x="836" y="458" width="317" height="22" rx="4" fill="#B98A3E"/>
+  <text x="994" y="473" text-anchor="middle" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" font-weight="700" fill="#14100A">coder .90 — solo</text>
+  <text x="836" y="498" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10" fill="#93A6C6">a qwen-coder request — waker sleeps the trio, wakes coder in seconds</text>
+
+  <!-- budget tick through both bars -->
+  <line x1="1160" y1="396" x2="1160" y2="484" stroke="#E8896B" stroke-width="1.5" stroke-dasharray="3 3"/>
+  <text x="1156" y="450" text-anchor="end" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#E8896B">budget .92</text>
+
+  <!-- ══ CPU panel ══ -->
+  <rect x="820" y="560" width="384" height="100" rx="12" fill="#101A2E" stroke="#33466B"/>
+  <text x="836" y="586" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="10" letter-spacing="1.5" fill="#93A6C6">CPU SIDECARS · ZERO VRAM</text>
+  <rect x="836" y="596" width="168" height="50" rx="8" fill="#152536" stroke="#3E7C8A"/>
+  <text x="848" y="616" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="11.5" font-weight="700" fill="#56C8DD">transcribe :8005</text>
+  <text x="848" y="633" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="9.5" fill="#93A6C6">Parakeet STT · ~30× realtime</text>
+  <rect x="1020" y="596" width="168" height="50" rx="8" fill="#152536" stroke="#3E7C8A"/>
+  <text x="1032" y="616" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="11.5" font-weight="700" fill="#56C8DD">tts :8006</text>
+  <text x="1032" y="633" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="9.5" fill="#93A6C6">Kokoro-82M TTS</text>
+
+  <!-- ══ cloud panel ══ -->
+  <rect x="250" y="660" width="230" height="110" rx="12" fill="#131A30" stroke="#6B549C"/>
+  <text x="266" y="686" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="10" letter-spacing="1.5" fill="#A98BEA">CLOUD BACKSTOP · OPENROUTER</text>
+  <text x="266" y="708" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10.5" fill="#C7D4EA">deepseek-pro / -flash · 1M ctx</text>
+  <text x="266" y="726" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10.5" fill="#C7D4EA">openai/* · anthropic/* wildcards</text>
+  <rect x="266" y="736" width="140" height="22" rx="11" fill="#241B3D" stroke="#6B549C"/>
+  <text x="336" y="751" text-anchor="middle" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10" fill="#A98BEA">$25 / 30 d hard cap</text>
+
+  <!-- ══ arrows ══ -->
+  <!-- apps → litellm -->
+  <line x1="190" y1="245" x2="244" y2="245" stroke="#7E93B8" stroke-width="1.5" marker-end="url(#arw)"/>
+  <text x="217" y="236" text-anchor="middle" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10" fill="#93A6C6">Bearer key</text>
+
+  <!-- litellm → waker -->
+  <line x1="460" y1="222" x2="534" y2="222" stroke="#7E93B8" stroke-width="1.5" marker-end="url(#arw)"/>
+  <text x="497" y="213" text-anchor="middle" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#93A6C6">/‹slug›/v1</text>
+
+  <!-- caddy → waker -->
+  <line x1="655" y1="80" x2="655" y2="104" stroke="#7E93B8" stroke-width="1.5" marker-end="url(#arw)"/>
+  <text x="663" y="97" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#93A6C6">:8007</text>
+
+  <!-- waker → GPU panel -->
+  <line x1="770" y1="190" x2="814" y2="190" stroke="#4ED9A4" stroke-width="2.5" marker-end="url(#arw-green)"/>
+
+  <!-- waker → docling row (docker lifecycle) -->
+  <polyline points="770,330 795,330 795,342 814,342" fill="none" stroke="#56C8DD" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arw-cyan)"/>
+
+  <!-- litellm → cpu -->
+  <polyline points="460,330 500,330 500,610 814,610" fill="none" stroke="#56C8DD" stroke-width="1.5" marker-end="url(#arw-cyan)"/>
+  <text x="650" y="602" text-anchor="middle" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#56C8DD">transcribe · tts</text>
+
+  <!-- litellm → cloud -->
+  <line x1="355" y1="410" x2="355" y2="654" stroke="#A98BEA" stroke-width="1.5" marker-end="url(#arw-violet)"/>
+  <text x="367" y="545" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10" fill="#A98BEA">local retries exhausted → order 2</text>
+  <text x="367" y="562" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10" fill="#A98BEA">context &gt; 64K → deepseek-pro</text>
+
+  <!-- footnote -->
+  <text x="36" y="800" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="10" fill="#64748B">waker invariant: Σ awake ≤ 0.92 of the card · evictions are idle + LRU only, never mid-request · every vLLM unit runs permanently with --enable-sleep-mode</text>
+</svg>
