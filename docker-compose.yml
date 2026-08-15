@@ -51,7 +51,7 @@ services:
   # have no :latest tag — pin the version. Known slow GPU/RAM leaks upstream: an
   # occasional `docker restart docling` is the reliable reclaim.
   # docling is a MANAGED GPU TENANT of waker.py: the waker binds the public :8007
-  # (see [[container]] in models.toml) and forwards here (:8009), docker-stopping
+  # (see [[container]] in models.toml) and forwards here (:8011), docker-stopping
   # this container when the coder needs the VRAM and starting it on demand.
   # restart: no — the waker owns the lifecycle; unless-stopped would resurrect it
   # behind the waker's back after a reboot swap.

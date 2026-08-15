@@ -175,8 +175,8 @@ grace    = 300
 sleep_ttl = 1800            # auto-stop after 30 min idle (also reclaims leaked VRAM)
 
 # --- Code (Qwen2.5-Coder-32B-AWQ) — disabled: cannot co-run with chat (memory 0.90) ---
-# Sleep-mode plan (docs/coder-sleep-mode.md): the unit runs permanently with
-# --enable-sleep-mode and is parked at level 2 (~0 VRAM) when idle; ./swap.sh
+# Sleep-mode plan (docs/wake-proxy.md): the unit runs permanently with
+# --enable-sleep-mode and is parked at level 2 (~0 VRAM) when idle; waker.py
 # wakes it in seconds instead of a 1-2 min cold boot. VLLM_SERVER_DEV_MODE=1
 # (set via infra.toml) exposes the /sleep + /wake_up endpoints on loopback.
 # overhead_gb is an UNMEASURED estimate — replace with a measured value after

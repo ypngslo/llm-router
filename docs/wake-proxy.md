@@ -1,6 +1,6 @@
 # waker.py — the sleep-aware wake proxy
 
-One RTX 5090 can't hold every model at once (chat 0.55 + embed 0.10 + rerank 0.10
+One RTX 5090 can't hold every model at once (chat 0.62 + embed 0.10 + rerank 0.10
 co-fit; coder needs 0.90 alone). Instead of manually starting/stopping units, every
 vLLM server runs **permanently** with `--enable-sleep-mode`, and `waker.py` (:8008)
 sits between LiteLLM and all of them:
@@ -99,7 +99,7 @@ back at the direct ports (8001/8002/8004) and `docker restart litellm`.
   polling for >300 s looks idle and can be evicted mid-task by a coder wake.
   Use sync, or keep polling, for conversions you can't afford to re-run.
 - First request after a level-2 wake re-reads weights from NVMe (seconds for the
-  4B, tens of seconds for the 32B); LiteLLM's `num_retries`/timeout absorb it.
+  9B, tens of seconds for the 32B); LiteLLM's `num_retries`/timeout absorb it.
 - **Level-2 wake needs an explicit weight reload.** `/wake_up` after a level-2
   sleep re-allocates VRAM but leaves it *uninitialized* — the model serves fluent
   garbage (verified live on vLLM 0.22.1). waker.py therefore always follows a

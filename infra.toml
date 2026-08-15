@@ -1,6 +1,6 @@
-# infra.toml — declares this project's services to server-infra's `infra` CLI.
-# Register from this dir:  uv run --project ~/code/system/server-infra/cli infra register
-# Field reference: ~/code/system/server-infra/docs/infra-config.md
+# infra.toml — declares this project's services to server-infra's `infra` CLI
+# (a separate repo that owns the box's port registry and renders the actual
+# systemd/compose/Caddy config). Register from this dir: `infra register`.
 #
 # Topology: `litellm` is the front door (the router). The `vllm-*` entries are the model
 # servers it proxies to over host loopback (litellm runs with network_mode: host). They run
@@ -9,9 +9,9 @@
 #
 # VRAM CAVEAT — infra cannot express the GPU budget. Registering a service only RESERVES its
 # port + renders its unit; it does NOT mean run it. Only `infra enable` a combination that
-# fits one 32GB card: chat (0.55) + embed-sm (0.10) + rerank (0.10) co-run; coder (0.90)
-# runs solo — see docs/coder-sleep-mode.md and ./swap.sh. (`./serve.py --list` prints the
-# budget.) docling on GPU adds ~5 GB and co-fits with the trio but not with coder.
+# fits one 32GB card: chat (0.62) + embed-sm (0.10) + rerank (0.10) co-run; coder (0.90)
+# runs solo — waker.py swaps it in on demand (docs/wake-proxy.md). (`./serve.py --list`
+# prints the budget.) docling on GPU adds ~5 GB and co-fits with the trio but not with coder.
 
 # ── Front door: LiteLLM proxy (container) ──────────────────────────────────────────────────
 [[service]]
