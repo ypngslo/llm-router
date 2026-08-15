@@ -4,10 +4,10 @@ model_list:
   # wakes the target model on demand (sleeping idle ones if the card is full) and
   # streams the request through — clients just see a slow first token after a swap.
 
-  # --- Chat + vision (Qwen3.5-4B) ---
+  # --- Chat + vision (Qwen3.5-9B, online FP8) ---
   # model must match vLLM's --served-model-name ("chat" from models.toml), not the repo path.
-  # Qwen3.5-4B is natively multimodal: this endpoint accepts image_url content parts
-  # (verified 2026-07) — no separate vision model needed.
+  # Qwen3.5 is natively multimodal: this endpoint accepts image_url content parts
+  # (verified 2026-07 on the 4B) — no separate vision model needed.
   - model_name: qwen-chat
     litellm_params:
       model: hosted_vllm/chat

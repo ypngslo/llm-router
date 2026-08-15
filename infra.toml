@@ -11,7 +11,8 @@
 # port + renders its unit; it does NOT mean run it. Only `infra enable` a combination that
 # fits one 32GB card: chat (0.62) + embed-sm (0.10) + rerank (0.10) co-run; coder (0.90)
 # runs solo — waker.py swaps it in on demand (docs/wake-proxy.md). (`./serve.py --list`
-# prints the budget.) docling on GPU adds ~5 GB and co-fits with the trio but not with coder.
+# prints the budget.) docling on GPU adds ~5 GB (0.16): beside the trio that exceeds the
+# waker budget, so a docling burst briefly evicts an idle tenant (LRU) and vice versa.
 
 # ── Front door: LiteLLM proxy (container) ──────────────────────────────────────────────────
 [[service]]
