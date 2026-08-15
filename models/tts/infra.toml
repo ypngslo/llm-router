@@ -1,0 +1,9 @@
+# Register/enable from this dir: `infra register && infra enable`.
+[[service]]
+name = "kokoro"              # text-to-speech (Kokoro-82M, CPU)
+role = "backend"
+reach = "host"
+kind = "compose"
+compose_file = "../../docker-compose.yml"
+service = "kokoro"
+port = 8006                  # pinned: compose publishes 127.0.0.1:8006 and litellm.yml assumes it

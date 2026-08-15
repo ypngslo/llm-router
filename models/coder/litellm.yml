@@ -1,0 +1,12 @@
+# qwen-coder — swapped in on demand by the waker: request arrives → chat is
+# slept → coder wakes (seconds) → response streams. No manual switching.
+# Disabled: this file is included from llm-config.yml only when the coder is
+# enabled (its include line is commented out there).
+# `model` must be hosted_vllm/<slug> where <slug> = this folder's name.
+model_list:
+  - model_name: qwen-coder
+    litellm_params:
+      model: hosted_vllm/coder
+      api_base: http://localhost:8008/coder/v1
+      api_key: "dummy"
+      cooldown_time: 0

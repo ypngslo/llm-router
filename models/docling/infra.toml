@@ -1,0 +1,22 @@
+# Register/enable from this dir: `infra register && infra enable`.
+# docling is NOT an OpenAI API, so no litellm.yml — it gets its own Caddy route.
+# Auth: X-Api-Key = DOCLING_API_KEY from .env.
+
+[[service]]
+name = "docling"             # the PUBLIC port — bound by the WAKER's passthrough
+role = "backend"             # listener (see container.toml); Caddy + clients use
+reach = "tailnet"            # this and never see the container lifecycle.
+path = "/docling"
+kind = "compose"
+compose_file = "../../docker-compose.yml"
+service = "docling"
+port = 8007
+
+[[service]]
+name = "docling-app"         # the REAL docling container behind the waker —
+role = "backend"             # port reservation for `upstream` (never routed)
+reach = "host"
+kind = "compose"
+compose_file = "../../docker-compose.yml"
+service = "docling"
+port = 8011

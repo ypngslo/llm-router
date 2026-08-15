@@ -1,0 +1,22 @@
+# qwen-chat — the local Qwen3.5-9B via the waker (order 1) with transparent cloud
+# failover to DeepSeek V4 Pro (order 2): same model_name, higher order. LiteLLM
+# tries local first; only when its retries are exhausted (connection refused,
+# timeout, 429, 5xx) does it escalate. Clients keep calling "qwen-chat" and never
+# know which backend served — check the response `model` field to detect cloud use.
+# Qwen3.5 is natively multimodal: this endpoint accepts image_url content parts.
+# `model` must be hosted_vllm/<slug> where <slug> = this folder's name.
+model_list:
+  - model_name: qwen-chat
+    litellm_params:
+      model: hosted_vllm/chat
+      api_base: http://localhost:8008/chat/v1
+      api_key: "dummy"            # vLLM ignores this unless started with --api-key
+      cooldown_time: 0            # sole local deployment — a cooldown would 503 every request
+      order: 1
+  - model_name: qwen-chat
+    litellm_params:
+      model: openrouter/deepseek/deepseek-v4-pro   # same backend as deepseek-pro — failover and context overflow land in one place
+      api_key: os.environ/OPENROUTER_API_KEY
+      order: 2
+    model_info:
+      disable_background_health_check: true   # health probes are real billable calls

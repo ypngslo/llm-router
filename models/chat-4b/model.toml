@@ -1,0 +1,19 @@
+# Qwen3.5-4B — the rollback for the 9B in models/chat/. The folder name is the
+# slug, so to roll back: swap the folder names (this becomes models/chat/, the 9B
+# becomes models/chat-9b/) and `infra restart vllm-chat`. Co-runs at 0.55.
+enable  = false
+name    = "Qwen/Qwen3.5-4B" # HF repo id
+task    = "generate"
+memory  = 0.55
+# 12288 = 2× the measured bf16 ceiling (387 blocks × 16 = 6,192 tok at 144 KB/tok,
+# co-resident with embed): --kv-cache-dtype fp8 halves KV to 72 KB/tok, doubling
+# the tokens the same 0.55 delivers. Raise further only by raising memory.
+maxlen  = 12288
+# overhead_gb: VRAM vLLM reserves beyond weights+KV (activations/CUDA graphs/
+# profiling). Measured ~8 GiB for this model at 32k.
+overhead_gb = 8.0
+params  = "--reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_xml --enable-sleep-mode --kv-cache-dtype fp8"
+sleep_level = 2             # 8 GB of weights won't fit the box's spare RAM; reload from NVMe
+sleep_ttl   = 0
+weights = "~8 GB"           # bf16 weights (informational, shown in --list)
+context = "32k"             # model's native context window (informational)

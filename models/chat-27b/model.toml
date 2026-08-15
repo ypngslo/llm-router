@@ -1,0 +1,19 @@
+# Qwen3.5-27B GPTQ-Int4 — REJECTED 2026-07-08 on measurement: the "Int4" repo is
+# 27.6 GiB in VRAM (29 GB on disk) — does not fit. Kept as a bench record.
+# It would have been the largest chat model that CO-RUNS with embed-sm/rerank
+# (0.74 + 0.10 + 0.10 = 0.94 < 0.95 — no waker eviction dance, no NVMe re-wakes).
+# (Qwen3.5-35B-A3B-GPTQ-Int4 was also tried 2026-07-08 and rejected: 21.1 GiB
+# weights + ~2 GiB parked-tenant CUDA contexts + warmup activations = OOM on the
+# 31.4 GiB card; and its 23 GB checkpoint can't page-cache in ~9 GB spare RAM →
+# ~10 min reload per eviction.)
+enable  = false
+name    = "Qwen/Qwen3.5-27B-GPTQ-Int4"
+task    = "generate"
+memory  = 0.74
+maxlen  = 32768
+overhead_gb = 5.0           # UNMEASURED estimate — serve.py runstats would record the real value
+params  = "--quantization gptq_marlin --dtype bfloat16 --kv-cache-dtype fp8 --max-num-batched-tokens 2096 --max-num-seqs 16 --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_xml --enable-sleep-mode"
+sleep_level = 2             # ~16 GB of weights — RAM can't hold them; NVMe reload
+sleep_ttl   = 0
+weights = "~16 GB"          # GPTQ Int4 shards
+context = "262k"            # native (GDN hybrid)

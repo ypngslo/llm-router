@@ -1,0 +1,14 @@
+# Register/enable from this dir: `infra register && infra enable` (or from
+# anywhere with --config). working_dir resolves against THIS file's dir;
+# a relative exec_start resolves against working_dir (the repo root).
+# VLLM_SERVER_DEV_MODE=1 exposes vLLM's /sleep, /wake_up, /is_sleeping endpoints
+# (loopback-only) — waker.py drives them.
+[[service]]
+name = "vllm-chat"
+role = "backend"             # port range 8000–8099
+reach = "host"               # no Caddy route — only litellm reaches it, via loopback
+kind = "systemd"
+exec_start = "./serve.py chat"
+working_dir = "../.."
+port = 8001
+environment = { VLLM_SERVER_DEV_MODE = "1" }

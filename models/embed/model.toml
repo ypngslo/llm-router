@@ -1,0 +1,14 @@
+# Qwen3-Embedding-4B — disabled alternative to embed-sm (the 0.6B). ~8 GB of
+# weights vs ~1.2 GB: enabling this costs chat ~7 GB. ~5 pts better on MMTEB.
+# To switch: disable embed-sm, enable this, point the `embeddings` litellm.yml
+# at this slug, and give it a port/service (its own infra.toml).
+# maxlen caps KV-cache size; embeddings work on short chunks so 4096 is plenty.
+enable  = false
+name    = "Qwen/Qwen3-Embedding-4B"
+task    = "embed"           # → vLLM --runner pooling (0.22 dropped --task)
+memory  = 0.30
+maxlen  = 4096
+overhead_gb = 1.5           # pooling runner reserves far less than a generate model (~1.4 GiB measured)
+params  = ""
+weights = "~8 GB"
+context = "32k"

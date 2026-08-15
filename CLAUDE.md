@@ -8,8 +8,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 self-hosted AI stack: a LiteLLM proxy (one OpenAI-compatible endpoint), a sleep-aware
 wake proxy (`waker.py`) that time-shares the GPU between vLLM model servers, and a few
 sibling containers (audio, document conversion). There is no build step and no test
-suite — the artifacts are `docker-compose.yml`, `llm-config.yml`, `models.toml`,
-`serve.py`, `waker.py`, and `infra.toml`.
+suite. **Each model is a folder under `models/`** (`model.toml` + `litellm.yml` +
+`infra.toml`; shared knobs in `models/defaults.toml`); the root artifacts are
+`docker-compose.yml`, `llm-config.yml`, `serve.py`, `waker.py`, and `infra.toml`
+(the stack chassis: litellm + waker only).
 
 **The architecture diagram, component tour, request-flow, and design rationale live in
 [README.md](README.md) — read it first.** Deep dive on the wake proxy (eviction rules,
@@ -42,7 +44,7 @@ curl http://127.0.0.1:4000/v1/audio/transcriptions -H "Authorization: Bearer $LI
 ## GPU / VRAM is the central constraint
 
 One RTX 5090 = **32 GB**. Each `vllm serve` reserves a fraction up front (`memory` in
-`models.toml` → `--gpu-memory-utilization`). Models co-run only if enabled fractions sum
+its `model.toml` → `--gpu-memory-utilization`). Models co-run only if enabled fractions sum
 to **< ~0.95**; `serve.py`'s launch-time fit check enforces reality.
 
 - Resident set: chat (0.62, Qwen3.5-9B online-FP8) + embed-sm (0.10) + rerank (0.10)
@@ -58,15 +60,20 @@ to **< ~0.95**; `serve.py`'s launch-time fit check enforces reality.
 
 ## Editing rules / gotchas
 
-- **`model` in `llm-config.yml` (hosted_vllm/<slug>) must match `slug` in `models.toml`**
-  (vLLM's `--served-model-name`), *not* the HF repo path. The `model_name` (`qwen-chat`,
-  `embeddings`, `transcribe`, ...) is the separate public name clients call.
-- **Enabling a vLLM model is a 3-place change**: `enable = true` in `models.toml`,
-  uncomment its block in `llm-config.yml` (+ `docker restart litellm`), and ensure the
-  `infra.toml` service is registered + enabled. Keep ports consistent: chat 8001,
-  embed 8002, coder 8003, rerank 8004, parakeet 8005, kokoro 8006, docling 8007,
-  waker 8008, docling-app 8011. New vLLM models are picked up by waker.py automatically
-  (it parses infra.toml + models.toml at startup — restart the waker unit after adding one).
+- **The folder name IS the slug** (vLLM's `--served-model-name`). In a folder's
+  `litellm.yml`, `model: hosted_vllm/<slug>` and the api_base path must use the folder
+  name, *not* the HF repo path. The `model_name` (`qwen-chat`, `embeddings`,
+  `transcribe`, ...) is the separate public name clients call.
+- **Enabling a vLLM model**: everything lives in its folder — `enable = true` in
+  `models/<slug>/model.toml`, uncomment its line in `llm-config.yml`'s `include:` list
+  (+ `docker restart litellm`), and `cd models/<slug> && infra register && infra enable`.
+  Keep ports consistent: chat 8001, embed 8002, coder 8003, rerank 8004, parakeet 8005,
+  kokoro 8006, docling 8007, waker 8008, docling-app 8011. New models are picked up by
+  waker.py automatically (it parses the model folders at startup — restart the waker
+  unit after adding one).
+- **In a model's `infra.toml`**, `working_dir` resolves against that file's dir
+  (`"../.."` = repo root) and a relative `exec_start` resolves against `working_dir`
+  (so `"./serve.py <slug>"`, not `"../../serve.py <slug>"`).
 - **Qwen3.5 non-negotiable flags** (hybrid GDN family): `--dtype bfloat16` (fp16
   crashes on mixed dtypes), `--max-num-batched-tokens 2096` (GDN cache alignment),
   `--enable-auto-tool-choice --tool-call-parser qwen3_xml` (XML-style calls — *not*
@@ -76,7 +83,7 @@ to **< ~0.95**; `serve.py`'s launch-time fit check enforces reality.
   `--hf-overrides` JSON in its params — written without spaces because serve.py splits
   `params` on whitespace.
 - `serve.py` uses an **absolute path for uv** on purpose: systemd runs units with a
-  stripped env. Relative `project` in `models.toml [defaults]` resolves against the repo
+  stripped env. Relative `project` in `models/defaults.toml` resolves against the repo
   dir, which is systemd-safe.
 - llm-config.yml is mounted read-only into the container — edits need `docker restart litellm`.
 - **qwen-chat is also the vision endpoint** — Qwen3.5 is natively multimodal and vLLM

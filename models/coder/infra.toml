@@ -1,0 +1,10 @@
+# Register/enable from this dir: `infra register && infra enable`.
+[[service]]
+name = "vllm-coder"
+role = "backend"
+reach = "host"
+kind = "systemd"
+exec_start = "./serve.py coder"
+working_dir = "../.."
+port = 8003
+environment = { VLLM_SERVER_DEV_MODE = "1" }

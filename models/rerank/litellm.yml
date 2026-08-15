@@ -1,0 +1,9 @@
+# rerank — serves /rerank (Cohere-style), not /chat or /embeddings.
+# `model` must be hosted_vllm/<slug> where <slug> = this folder's name.
+model_list:
+  - model_name: rerank
+    litellm_params:
+      model: hosted_vllm/rerank
+      api_base: http://localhost:8008/rerank/v1
+      api_key: "dummy"
+      cooldown_time: 0

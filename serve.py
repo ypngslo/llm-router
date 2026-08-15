@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """serve.py — launch a single VRAM-capped vLLM server for one model.
 
-Config lives in models.toml (same dir); this file just reads it and execs vllm.
+Each model lives in models/<slug>/model.toml (the folder name is the slug);
+shared knobs in models/defaults.toml. This file just reads them and execs vllm.
 
 Usage:
   ./serve.py <slug>          start the named model in the foreground
@@ -31,10 +32,11 @@ import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
-CONFIG = Path(__file__).resolve().parent / "models.toml"
+REPO = Path(__file__).resolve().parent
+MODELS_DIR = REPO / "models"
 # P2 (serve-sizing-plan.md): measured per-run stats, written by a detached recorder
 # forked at launch. Gitignored — values are gpu/vllm-version/config specific.
-RUNSTATS = Path(__file__).resolve().parent / ".runstats.json"
+RUNSTATS = REPO / ".runstats.json"
 # uv lives under ~/.local/bin which is NOT on systemd's stripped PATH, so call it
 # by absolute path. Override via the environment.
 UV = os.environ.get("UV", "/home/beans/.local/bin/uv")
@@ -44,7 +46,7 @@ MiB = 1024**2
 # Bytes vLLM reserves beyond weights+KV (activations, CUDA graphs, profiling). NOT
 # derivable from config and highly model-dependent — ~8 GiB on chat (generate, 32k)
 # vs ~1.4 GiB on embed (pooling). So it's set PER-MODEL via `overhead_gb` in
-# models.toml (bootstrap values measured this session; P2 will replace them with
+# each model.toml (bootstrap values measured by hand; P2 replaces them with
 # recorded run-stats). This default is only a fallback for a model that sets none.
 DEFAULT_OVERHEAD_GB = 3.0
 # Fail only when the shortfall is gross. The footprint math is approximate (vLLM's
@@ -56,10 +58,15 @@ DTYPE_BYTES = {"float16": 2, "bfloat16": 2, "float32": 4, "float": 4, "half": 2}
 
 
 def load():
-    with CONFIG.open("rb") as f:
-        data = tomllib.load(f)
-    defaults = data.get("defaults", {})
-    models = {m["slug"]: m for m in data.get("model", [])}
+    """models/defaults.toml + every models/*/model.toml — the folder name is the slug."""
+    with (MODELS_DIR / "defaults.toml").open("rb") as f:
+        defaults = tomllib.load(f)
+    models = {}
+    for path in sorted(MODELS_DIR.glob("*/model.toml")):
+        with path.open("rb") as f:
+            m = tomllib.load(f)
+        m["slug"] = path.parent.name
+        models[m["slug"]] = m
     return defaults, models
 
 
@@ -155,14 +162,17 @@ def measured_stats(m):
 
 
 def unit_for_slug(slug):
-    """systemd unit name for a slug, from infra.toml ('./serve.py <slug>')."""
-    try:
-        with (CONFIG.parent / "infra.toml").open("rb") as f:
-            for svc in tomllib.load(f).get("service", []):
-                if svc.get("kind") == "systemd" and svc.get("exec_start", "").endswith(f"serve.py {slug}"):
-                    return svc["name"]
-    except Exception:
-        pass
+    """systemd unit name for a slug, from the root infra.toml + every model's own
+    models/*/infra.toml (exec_start ends in 'serve.py <slug>')."""
+    for path in [REPO / "infra.toml", *sorted(MODELS_DIR.glob("*/infra.toml"))]:
+        try:
+            with path.open("rb") as f:
+                services = tomllib.load(f).get("service", [])
+        except Exception:
+            continue
+        for svc in services:
+            if svc.get("kind") == "systemd" and svc.get("exec_start", "").endswith(f"serve.py {slug}"):
+                return svc["name"]
     return None
 
 
@@ -461,10 +471,10 @@ def fmt_list(defaults, models):
 
 # ── Launch ───────────────────────────────────────────────────────────────────────
 def launch(defaults, m, fit=False):
-    project = str((CONFIG.parent / defaults.get("project", ".")).resolve())
+    project = str((REPO / defaults.get("project", ".")).resolve())
     bind_host = os.environ.get("BIND_HOST", defaults.get("bind_host", "0.0.0.0"))
     # Port is owned by infra.toml, which bakes Environment=PORT=<assigned> into the
-    # systemd unit. It is the single source — not duplicated in models.toml. For a
+    # systemd unit. It is the single source — not duplicated in model.toml. For a
     # manual run outside systemd, pass it yourself: `PORT=8001 ./serve.py chat`.
     port = os.environ.get("PORT")
     if not port:

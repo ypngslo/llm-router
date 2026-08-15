@@ -1,0 +1,17 @@
+# Qwen3-Reranker-0.6B — cross-encoder for RAG reranking (dad-rag Stage 3):
+# scores (query, passage) pairs via vLLM's /rerank endpoint. The original
+# Qwen3-Reranker weights are a causal-LM checkpoint; the hf-overrides JSON
+# converts them to a sequence-classification model (per the model card's vLLM
+# instructions). The JSON has no spaces because serve.py splits `params` on
+# whitespace.
+enable  = true
+name    = "Qwen/Qwen3-Reranker-0.6B"
+task    = "score"           # → vLLM --runner pooling (cross-encoder scoring)
+memory  = 0.10
+maxlen  = 4096
+overhead_gb = 1.0
+params  = '--hf-overrides {"architectures":["Qwen3ForSequenceClassification"],"classifier_from_token":["no","yes"],"is_original_qwen3_reranker":true} --enable-sleep-mode'
+sleep_level = 1             # 1.2 GB — cheap to park in RAM, instant wake
+sleep_ttl   = 0
+weights = "~1.2 GB"
+context = "32k"

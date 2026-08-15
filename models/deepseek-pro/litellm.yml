@@ -1,0 +1,11 @@
+# deepseek-pro — DeepSeek V4 Pro via OpenRouter (1M context). Cloud-only: no
+# model.toml/infra.toml. The big-context escape hatch for agent traffic:
+# qwen-chat context overflows route here (see context_window_fallbacks in
+# llm-config.yml), and Hermes users can pick it explicitly with /model deepseek-pro.
+model_list:
+  - model_name: deepseek-pro
+    litellm_params:
+      model: openrouter/deepseek/deepseek-v4-pro
+      api_key: os.environ/OPENROUTER_API_KEY
+    model_info:
+      disable_background_health_check: true   # health probes are real billable calls

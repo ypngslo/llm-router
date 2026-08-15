@@ -1,0 +1,22 @@
+# Chat + vision: Qwen3.5-9B, online FP8.
+# bf16 checkpoint (19.3 GB) quantized to FP8 by vLLM AT LOAD (--quantization fp8):
+# MEASURED 2026-07-08 on a scratch-port test boot: 10.81 GiB weights in VRAM,
+# 322,506 KV tokens at memory=0.62/maxlen=16384, tool calls verified through
+# qwen3_xml. Co-runs with embed-sm/rerank: 0.62 + 0.10 + 0.10 = 0.82.
+# Qwen3.5 non-negotiables (hybrid GDN family): --dtype bfloat16 (fp16 crashes on
+# mixed dtypes), --max-num-batched-tokens 2096 (GDN cache alignment), qwen3_xml
+# tool parser (XML-style calls; hermes expects JSON), --enable-auto-tool-choice.
+enable  = true
+name    = "Qwen/Qwen3.5-9B"
+task    = "generate"
+memory  = 0.62
+# 65536 (raised 2026-07-15 from the first-boot 12288): the scratch test measured
+# 322,506 KV tokens at this memory=0.62 budget, so a 64K window fits with ~5×
+# headroom. Hermes Agent requires >=64K context — this is its floor.
+maxlen  = 65536
+overhead_gb = 8.0           # family measurement (4B at 32k); 0.62 test left ample slack
+params  = "--quantization fp8 --dtype bfloat16 --kv-cache-dtype fp8 --max-num-batched-tokens 2096 --max-num-seqs 16 --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_xml --enable-sleep-mode"
+sleep_level = 2             # 19.3 GB checkpoint can't page-cache in ~9 GB spare RAM
+sleep_ttl   = 0             # stay awake; co-resident, so eviction is rare (docling bursts)
+weights = "10.8 GB"         # MEASURED in VRAM after online FP8
+context = "262k"            # native; served at 64K (maxlen)

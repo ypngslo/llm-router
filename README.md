@@ -8,21 +8,37 @@ text-to-speech, and document conversion — with the models **time-sharing a
 
 > This is my personal infrastructure, published as a working demonstration.
 > It runs my agents, my RAG pipeline, and my document ingestion every day, but
-> it is not packaged for reuse: every number in `models.toml` is tuned to one
-> specific box (32 GB of VRAM, ~59 GB of RAM, NVMe, Blackwell CUDA). Read it
-> as a reference for *how* to build this kind of thing, not as an installable.
+> it is not packaged for reuse: every number in the model configs is tuned to
+> one specific box (32 GB of VRAM, ~59 GB of RAM, NVMe, Blackwell CUDA). Read
+> it as a reference for *how* to build this kind of thing, not as an installable.
 
 There is no build step and no framework — the whole system is two small Python
-programs (~1,000 lines total), three config files, and a Docker Compose file:
+programs (~1,000 lines total) plus config. **Each model is a folder**: everything
+that defines it — its vLLM server config, its public LiteLLM entry, its own
+service declaration — lives in one place, and adding or retiring a model is a
+folder operation:
+
+```
+models/
+  chat/            Qwen3.5-9B — the resident chat + vision model
+    model.toml       vLLM config: HF repo, VRAM fraction, context, sleep behavior
+    litellm.yml      its public API entries (incl. its cloud-failover twin)
+    infra.toml       its service: port, systemd unit  (cd here → infra register)
+  embed-sm/  rerank/  coder/       same shape
+  transcribe/  tts/                CPU containers: litellm.yml + infra.toml only
+  docling/                         managed GPU container: container.toml instead
+  deepseek-pro/  deepseek-flash/   cloud-only: just a litellm.yml
+  chat-27b/  chat-4b/  embed/      bench + rollback configs (disabled)
+  defaults.toml                    shared knobs (uv project, bind host, waker budget)
+```
 
 | File | Role |
 |---|---|
-| `llm-config.yml` | LiteLLM proxy config: the public model list, routing, failover, budgets |
-| `models.toml` | Source of truth for every GPU tenant: model, VRAM fraction, context, sleep behavior |
 | `serve.py` | Launches one vLLM server per model — and **refuses to start** what won't fit |
 | `waker.py` | Sleep-aware reverse proxy that time-shares the GPU between models on demand |
+| `llm-config.yml` | LiteLLM router: stack-wide routing/budget settings + the model include list |
 | `docker-compose.yml` | LiteLLM + the CPU audio containers + docling |
-| `infra.toml` | Service declarations for my external `infra` CLI (ports, systemd units, HTTPS edge) |
+| `infra.toml` | The stack chassis (LiteLLM + waker) declared to my external `infra` CLI |
 | `docs/wake-proxy.md` | Design notes and known tradeoffs of the wake proxy |
 
 ## What one card serves
@@ -175,11 +191,14 @@ latency are sliceable per app.
 
 ## Design rules the repo follows
 
-- **Nothing is configured twice.** Ports live only in `infra.toml` (baked into
-  systemd units as `PORT=`); model facts live only in `models.toml`. The waker
-  derives its entire world by parsing both at startup — adding a model needs
-  zero waker config. `serve.py` reads `infra.toml` right back to find its own
-  unit name.
+- **Nothing is configured twice.** Ports live only in each model's `infra.toml`
+  (baked into systemd units as `PORT=`); model facts live only in its
+  `model.toml`. The waker derives its entire world by parsing the model folders
+  at startup — adding a model needs zero waker config. `serve.py` reads the
+  same `infra.toml` files right back to find its own unit name. The one
+  list maintained by hand is `llm-config.yml`'s `include:` — LiteLLM appends
+  each folder's `litellm.yml` to its model list, so a model's public identity
+  ships next to the model.
 - **Fail fast and loud, recover without a human.** The fit check refuses
   doomed launches; the waker 503s instead of queueing forever; the watchdog
   hands wedged processes back to systemd; the reaper reconciles drifted state.

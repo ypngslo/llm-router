@@ -1,0 +1,17 @@
+# Qwen2.5-Coder-32B AWQ — disabled: cannot co-run with chat (memory 0.90, runs
+# solo). Fully wired for on-demand swapping: the unit runs permanently with
+# --enable-sleep-mode, parked at level 2 (~0 VRAM) when idle; waker.py wakes it
+# in seconds instead of a 1–2 min cold boot. Activation runbook (uncomment its
+# include line in llm-config.yml, first boot needs the card free):
+# docs/wake-proxy.md.
+enable  = false
+name    = "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ"
+task    = "generate"
+memory  = 0.90
+maxlen  = 16384
+overhead_gb = 6.0           # UNMEASURED estimate — serve.py runstats will record the real value
+params  = "--quantization awq --enable-sleep-mode"
+sleep_level = 2             # 19 GB of weights — RAM can't hold them; NVMe reload
+sleep_ttl   = 900           # park 15 min after the last coder request
+weights = "~19 GB"          # AWQ 4-bit, fits one 32 GB card alone
+context = "32k"

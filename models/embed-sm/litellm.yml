@@ -1,0 +1,11 @@
+# embeddings — OpenAI /v1/embeddings via the waker.
+# `model` must be hosted_vllm/<slug> where <slug> = this folder's name.
+model_list:
+  - model_name: embeddings
+    litellm_params:
+      model: hosted_vllm/embed-sm
+      api_base: http://localhost:8008/embed-sm/v1
+      api_key: "dummy"
+      cooldown_time: 0
+    model_info:
+      mode: embedding

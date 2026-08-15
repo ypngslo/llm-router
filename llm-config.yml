@@ -1,107 +1,21 @@
+# llm-config.yml — the LiteLLM router: stack-wide settings + the model include list.
+# Each model's entries live NEXT TO the model in models/<name>/litellm.yml; the
+# include below pulls them in (LiteLLM extends model_list across included files).
+# To disable a model at the router: comment out its include line + `docker restart
+# litellm`. Paths resolve inside the container against /app: the compose file
+# mounts this file at /app/config.yaml and ./models at /app/models (both ro).
+
+include:
+  - models/chat/litellm.yml
+  - models/embed-sm/litellm.yml
+  - models/rerank/litellm.yml
+  - models/transcribe/litellm.yml
+  - models/tts/litellm.yml
+  - models/deepseek-pro/litellm.yml
+  - models/deepseek-flash/litellm.yml
+  # - models/coder/litellm.yml   # enable with the coder unit — see docs/wake-proxy.md
+
 model_list:
-  # vLLM models route via waker.py (:8008), the sleep-aware proxy: api_base is
-  # http://localhost:8008/<slug>/v1 where <slug> matches models.toml. The waker
-  # wakes the target model on demand (sleeping idle ones if the card is full) and
-  # streams the request through — clients just see a slow first token after a swap.
-
-  # --- Chat + vision (Qwen3.5-9B, online FP8) ---
-  # model must match vLLM's --served-model-name ("chat" from models.toml), not the repo path.
-  # Qwen3.5 is natively multimodal: this endpoint accepts image_url content parts
-  # (verified 2026-07 on the 4B) — no separate vision model needed.
-  - model_name: qwen-chat
-    litellm_params:
-      model: hosted_vllm/chat
-      api_base: http://localhost:8008/chat/v1
-      api_key: "dummy"            # vLLM ignores this unless you started it with --api-key
-      cooldown_time: 0            # sole local deployment — never bench it (a cooldown would 503 every request)
-      order: 1                    # tried before the cloud backup below
-
-  # --- Embeddings (Qwen3-Embedding-0.6B) ---
-  # model must match vLLM's --served-model-name ("embed-sm" from models.toml), not the repo path.
-  - model_name: embeddings
-    litellm_params:
-      model: hosted_vllm/embed-sm
-      api_base: http://localhost:8008/embed-sm/v1
-      api_key: "dummy"
-      cooldown_time: 0
-    model_info:
-      mode: embedding
-
-  # --- Reranker (Qwen3-Reranker-0.6B) ---
-  # Serves /rerank (Cohere-style), not /chat or /embeddings. model must match
-  # vLLM's --served-model-name ("rerank" from models.toml), not the repo path.
-  - model_name: rerank
-    litellm_params:
-      model: hosted_vllm/rerank
-      api_base: http://localhost:8008/rerank/v1
-      api_key: "dummy"
-      cooldown_time: 0
-
-  # --- Speech-to-text (Parakeet TDT 0.6B v3, CPU int8 container on :8005) ---
-  # OpenAI /v1/audio/transcriptions. Runs on CPU (~30x realtime) — zero VRAM.
-  - model_name: transcribe
-    litellm_params:
-      model: openai/parakeet-tdt-0.6b-v3
-      api_base: http://localhost:8005/v1
-      api_key: "dummy"
-    model_info:
-      mode: audio_transcription
-
-  # --- Text-to-speech (Kokoro-82M, CPU container on :8006) ---
-  # OpenAI /v1/audio/speech. voice: af_bella, af_sky, ... (or weighted mixes "af_bella(2)+af_sky(1)").
-  - model_name: tts
-    litellm_params:
-      model: openai/kokoro
-      api_base: http://localhost:8006/v1
-      api_key: "dummy"
-    model_info:
-      mode: audio_speech
-
-  # --- Code (Qwen2.5-Coder-32B-AWQ) — disabled; enable with the coder unit (see docs/wake-proxy.md) ---
-  # model must match vLLM's --served-model-name ("coder" from models.toml), not the repo path.
-  # Once enabled, the waker swaps it in on demand: request arrives → chat is slept →
-  # coder wakes (seconds) → response streams. No manual switching.
-  # - model_name: qwen-coder
-  #   litellm_params:
-  #     model: hosted_vllm/coder
-  #     api_base: http://localhost:8008/coder/v1
-  #     api_key: "dummy"
-
-  # --- CLOUD BACKUP -----------------------------------------------------------------------
-  # Same model_name as the local deployment + higher `order`. LiteLLM tries order=1
-  # (local vLLM) first; only when its retries are exhausted (connection refused,
-  # timeout, 429, 5xx) does it escalate to order=2. Clients keep calling "qwen-chat"
-  # and never know which backend served — check the response `model` field /
-  # `x-litellm-model-api-base` header to detect cloud usage.
-  - model_name: qwen-chat
-    litellm_params:
-      model: openrouter/deepseek/deepseek-v4-pro   # same backend as deepseek-pro — 1M ctx, so failover and context overflow land in one place
-      api_key: os.environ/OPENROUTER_API_KEY
-      order: 2
-    model_info:
-      disable_background_health_check: true   # health probes are real billable calls
-
-  # --- DeepSeek V4 Pro via OpenRouter (1M context) ------------------------------------
-  # The big-context escape hatch for agent traffic: qwen-chat context overflows route
-  # here (see context_window_fallbacks), and Hermes users can pick it explicitly with
-  # /model deepseek-pro.
-  - model_name: deepseek-pro
-    litellm_params:
-      model: openrouter/deepseek/deepseek-v4-pro
-      api_key: os.environ/OPENROUTER_API_KEY
-    model_info:
-      disable_background_health_check: true   # health probes are real billable calls
-
-  # --- DeepSeek V4 Flash via OpenRouter (1M context) ----------------------------------
-  # Same 1M window as pro at ~1/3 the input price ($0.14 vs $0.435 per M) — the
-  # cheap default for chat-facing agents that don't need pro's depth.
-  - model_name: deepseek-flash
-    litellm_params:
-      model: openrouter/deepseek/deepseek-v4-flash
-      api_key: os.environ/OPENROUTER_API_KEY
-    model_info:
-      disable_background_health_check: true   # health probes are real billable calls
-
   # Wildcards: call ANY cloud model through this proxy (model="anthropic/claude-...").
   - model_name: "openai/*"
     litellm_params:
@@ -124,7 +38,7 @@ router_settings:
   # 1M-context cloud model instead of erroring:
   context_window_fallbacks: [{"qwen-chat": ["deepseek-pro"]}]
   # No default_fallbacks: embeddings/rerank/audio have no same-shape cloud twin,
-  # and qwen-chat already fails over via `order`.
+  # and qwen-chat already fails over via `order` (see models/chat/litellm.yml).
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY   # clients must send this as Bearer token
@@ -134,7 +48,7 @@ general_settings:
   # "max_budget":...} instead of handing out the master key — that's also what makes
   # Langfuse traces attributable per app.
   database_url: os.environ/DATABASE_URL
-  store_model_in_db: false  # this file stays the source of truth for the model list
+  store_model_in_db: false  # the include list above stays the source of truth
 
 litellm_settings:
   drop_params: true       # silently drop unsupported params instead of erroring

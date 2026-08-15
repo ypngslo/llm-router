@@ -12,6 +12,9 @@ services:
     network_mode: host
     volumes:
       - ./llm-config.yml:/app/config.yaml:ro
+      # Per-model litellm.yml fragments, pulled in by config.yaml's `include:`
+      # (paths resolve against /app inside the container).
+      - ./models:/app/models:ro
     command: ["--config", "/app/config.yaml", "--host", "127.0.0.1", "--port", "${PORT_LITELLM:-4000}"]
     env_file:
       - .env
@@ -51,7 +54,7 @@ services:
   # have no :latest tag — pin the version. Known slow GPU/RAM leaks upstream: an
   # occasional `docker restart docling` is the reliable reclaim.
   # docling is a MANAGED GPU TENANT of waker.py: the waker binds the public :8007
-  # (see [[container]] in models.toml) and forwards here (:8011), docker-stopping
+  # (see models/docling/container.toml) and forwards here (:8011), docker-stopping
   # this container when the coder needs the VRAM and starting it on demand.
   # restart: no — the waker owns the lifecycle; unless-stopped would resurrect it
   # behind the waker's back after a reboot swap.

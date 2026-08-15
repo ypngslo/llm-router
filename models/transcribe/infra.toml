@@ -1,0 +1,9 @@
+# Register/enable from this dir: `infra register && infra enable`.
+[[service]]
+name = "parakeet"            # speech-to-text (NVIDIA Parakeet TDT 0.6B v3, CPU int8)
+role = "backend"
+reach = "host"
+kind = "compose"
+compose_file = "../../docker-compose.yml"
+service = "parakeet"
+port = 8005                  # pinned: compose publishes 127.0.0.1:8005 and litellm.yml assumes it

@@ -7,19 +7,20 @@ sure that backend is awake — waking it, and first putting idle backends to
 sleep if the card can't hold both — then streams the request through.
 Clients just see a slow first token after a swap, never an error.
 
-Config is read from the files that already own it (nothing is duplicated):
-  infra.toml   which vLLM units exist and their ports ("./serve.py <slug>")
-  models.toml  memory fraction per slug, plus the waker knobs:
+Config is read from the files that already own it (nothing is duplicated).
+Each model lives in models/<slug>/ — the folder name is the slug:
+  models/*/infra.toml  which vLLM units exist and their ports ("serve.py <slug>")
+  models/*/model.toml  memory fraction, plus the waker knobs:
                  sleep_level  1 = weights→CPU RAM (~1s wake, costs RAM)
                               2 = discard weights (~seconds wake from NVMe, ~0 RAM)
                  sleep_ttl    seconds idle before the reaper parks it (0/absent =
                               stay awake until something else needs the room)
-               and in [defaults]:
+  models/defaults.toml  may set:
                  waker_budget  max sum of awake memory fractions (default 0.92)
                  waker_grace   seconds since last use before a model may be
                                evicted for someone else (anti-thrash, default 60)
-               plus [[container]] blocks: non-vLLM GPU tenants (docling) that the
-               waker docker-stops/-starts instead of sleeping/waking. Each gets a
+  models/*/container.toml  non-vLLM GPU tenants (docling) that the waker
+               docker-stops/-starts instead of sleeping/waking. Each gets a
                dedicated passthrough listener (`listen`) so its public port never
                changes, forwarding to the container's real port (`upstream`).
 
@@ -35,7 +36,7 @@ Endpoints (loopback-only, same trust model as the vLLM ports):
   /...                  passthrough to that listener's container (extra ports)
 
 vLLM sleep endpoints exist only when the unit runs with VLLM_SERVER_DEV_MODE=1
-(infra.toml bakes it in) and --enable-sleep-mode (models.toml params).
+(each model's infra.toml bakes it in) and --enable-sleep-mode (model.toml params).
 """
 
 import asyncio
@@ -61,25 +62,28 @@ AWAKE, ASLEEP, WAKING, DOWN = "awake", "asleep", "waking", "down"
 
 
 def load_config():
-    with (HERE / "models.toml").open("rb") as f:
-        mdata = tomllib.load(f)
-    with (HERE / "infra.toml").open("rb") as f:
-        idata = tomllib.load(f)
+    models_dir = HERE / "models"
+    with (models_dir / "defaults.toml").open("rb") as f:
+        defaults = tomllib.load(f)
 
-    # slug -> port, from the systemd services that launch "./serve.py <slug>"
+    # slug -> port, from the systemd services that launch "serve.py <slug>"
+    # (each model's own models/<slug>/infra.toml, plus the root infra.toml)
     ports = {}
-    for svc in idata.get("service", []):
-        exec_start = svc.get("exec_start", "")
-        if svc.get("kind") == "systemd" and "serve.py" in exec_start:
-            slug = exec_start.split()[-1]
-            ports[slug] = svc["port"]
+    for path in [HERE / "infra.toml", *sorted(models_dir.glob("*/infra.toml"))]:
+        with path.open("rb") as f:
+            idata = tomllib.load(f)
+        for svc in idata.get("service", []):
+            exec_start = svc.get("exec_start", "")
+            if svc.get("kind") == "systemd" and "serve.py" in exec_start:
+                ports[exec_start.split()[-1]] = svc["port"]
 
-    defaults = mdata.get("defaults", {})
     backends = {}
-    for m in mdata.get("model", []):
-        slug = m["slug"]
+    for path in sorted(models_dir.glob("*/model.toml")):
+        slug = path.parent.name
         if slug not in ports:
-            continue
+            continue          # disabled/bench model with no registered unit
+        with path.open("rb") as f:
+            m = tomllib.load(f)
         backends[slug] = Backend(
             slug=slug,
             port=ports[slug],
@@ -87,8 +91,10 @@ def load_config():
             sleep_level=int(m.get("sleep_level", 2)),
             sleep_ttl=int(m.get("sleep_ttl", 0)),
         )
-    for c in mdata.get("container", []):
-        slug = c["slug"]
+    for path in sorted(models_dir.glob("*/container.toml")):
+        slug = path.parent.name
+        with path.open("rb") as f:
+            c = tomllib.load(f)
         backends[slug] = Backend(
             slug=slug,
             port=int(c["upstream"]),
@@ -426,7 +432,7 @@ def log(msg):
 async def run(port):
     backends, budget, grace = load_config()
     if not backends:
-        sys.exit("no vLLM backends found in infra.toml/models.toml")
+        sys.exit("no vLLM backends found under models/*/")
     w = Waker(backends, budget, grace)
     w.session = aiohttp.ClientSession()
     for b in backends.values():

@@ -1,0 +1,11 @@
+# transcribe — speech-to-text, OpenAI /v1/audio/transcriptions.
+# NVIDIA Parakeet TDT 0.6B v3, int8 ONNX on CPU (~30× realtime) — zero VRAM,
+# keeps working whatever the GPU is doing. Container in ../../docker-compose.yml.
+model_list:
+  - model_name: transcribe
+    litellm_params:
+      model: openai/parakeet-tdt-0.6b-v3
+      api_base: http://localhost:8005/v1
+      api_key: "dummy"
+    model_info:
+      mode: audio_transcription

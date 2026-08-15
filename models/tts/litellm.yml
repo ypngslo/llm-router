@@ -1,0 +1,11 @@
+# tts — text-to-speech, OpenAI /v1/audio/speech. Kokoro-82M on CPU (realtime).
+# voice: af_bella, af_sky, ... (or weighted mixes "af_bella(2)+af_sky(1)").
+# Container in ../../docker-compose.yml.
+model_list:
+  - model_name: tts
+    litellm_params:
+      model: openai/kokoro
+      api_base: http://localhost:8006/v1
+      api_key: "dummy"
+    model_info:
+      mode: audio_speech

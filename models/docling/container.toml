@@ -1,0 +1,17 @@
+# docling-serve — document conversion API. A managed GPU tenant of waker.py:
+# not vLLM, so instead of sleep/wake the waker docker-stops/-starts the
+# container. The waker binds the stable public port (`listen` — what Caddy
+# routes to) and forwards to the real container (`upstream`), so clients never
+# see the lifecycle. ~5 GB when its models are loaded (0.16 of the card).
+# sleep_ttl doubles as the leak mitigation — docling-serve leaks GPU/RAM slowly
+# upstream, and a stopped container is the only reliable reclaim.
+# grace 300s: status-polls on running conversions refresh last-use, so an active
+# ingestion won't have its container stopped for an idle-ish coder.
+# The container itself is defined in ../../docker-compose.yml (restart: "no" —
+# the waker owns the lifecycle).
+container = "docling"       # docker container_name
+listen   = 8007             # waker binds this; infra routes Caddy /docling here
+upstream = 8011             # compose publishes the real container here (docling-app)
+memory   = 0.16
+grace    = 300
+sleep_ttl = 1800            # auto-stop after 30 min idle (also reclaims leaked VRAM)

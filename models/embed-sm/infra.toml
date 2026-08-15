@@ -1,0 +1,10 @@
+# Register/enable from this dir: `infra register && infra enable`.
+[[service]]
+name = "vllm-embed"
+role = "backend"
+reach = "host"
+kind = "systemd"
+exec_start = "./serve.py embed-sm"
+working_dir = "../.."
+port = 8002
+environment = { VLLM_SERVER_DEV_MODE = "1" }

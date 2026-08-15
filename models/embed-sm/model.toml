@@ -1,0 +1,14 @@
+# Qwen3-Embedding-0.6B — near-SOTA for its size; fine for English/clean-corpus
+# RAG, especially with the reranker behind it. The 4B alternative sits disabled
+# in models/embed/.
+enable  = true
+name    = "Qwen/Qwen3-Embedding-0.6B"
+task    = "embed"           # → vLLM --runner pooling (0.22 dropped --task)
+memory  = 0.10
+maxlen  = 4096              # embeddings work on short chunks; caps KV VRAM
+overhead_gb = 1.0
+params  = "--enable-sleep-mode"
+sleep_level = 1             # 1.2 GB — cheap to park in RAM, instant wake
+sleep_ttl   = 0             # dad-rag hits this constantly; never auto-sleep
+weights = "~1.2 GB"
+context = "32k"

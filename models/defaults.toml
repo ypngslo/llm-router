@@ -1,0 +1,36 @@
+# models/defaults.toml — knobs shared by every model server.
+#
+# Each model lives in models/<slug>/ — the FOLDER NAME is the slug (vLLM's
+# --served-model-name). A folder holds up to three files:
+#   model.toml      the vLLM server config (bare keys, read by serve.py + waker.py)
+#   litellm.yml     its LiteLLM model_list entries (pulled in by llm-config.yml's include)
+#   infra.toml      its [[service]] block (register with `cd models/<slug> && infra register`)
+# Cloud-only models have just litellm.yml; managed containers (docling) have
+# container.toml instead of model.toml.
+#
+# VRAM budget (one RTX 5090 = 32 GB): each `vllm serve` reserves `memory` (a
+# fraction of the card) up front. Models co-run only if their enabled fractions
+# sum to < ~0.95. `./serve.py --list` prints the running total and the live fit.
+#
+# Ports are NOT here: each model's infra.toml owns its port (infra bakes
+# Environment=PORT=<port> into the unit). Manual runs: `PORT=<n> ./serve.py <slug>`.
+#
+# Sleep mode: every model runs with --enable-sleep-mode and sits behind waker.py
+# (the sleep-aware proxy on :8008 that LiteLLM actually talks to). Per-model knobs
+# read by waker.py, not serve.py:
+#   sleep_level  1 = weights parked in CPU RAM (~1s wake; costs RAM — box has ~9 GB
+#                    spare, so only the 0.6B models use it)
+#                2 = weights discarded (~seconds wake from NVMe cache; ~0 RAM)
+#   sleep_ttl    seconds idle before waker parks it; 0 = stay awake until another
+#                model needs the VRAM (eviction is LRU among idle models).
+# [defaults] here may also set waker_budget (max sum of awake memory fractions,
+# default 0.92) and waker_grace (anti-thrash eviction grace seconds, default 60).
+
+# The uv project that has vllm installed. "." = the repo root (it owns its own
+# vllm via pyproject.toml). serve.py resolves a relative path against the repo
+# dir, so this works under systemd's stripped env too.
+project = "."
+# vLLM runs on the HOST and the LiteLLM container reaches it over the docker
+# bridge, so bind where the bridge can hit it. Keep these ports off the LAN with
+# ufw (e.g. `sudo ufw deny 8001:8003/tcp`).
+bind_host = "0.0.0.0"

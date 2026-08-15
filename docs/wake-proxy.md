@@ -17,8 +17,8 @@ A sleeping vLLM process keeps its compiled CUDA graphs but releases its GPU memo
 so "swapping models" is seconds, not the 1–2 minute cold boot. Clients never see the
 mechanics — just a slow first token after a swap.
 
-Non-vLLM GPU tenants join the same budget via `[[container]]` blocks in models.toml
-(currently docling, `memory = 0.16`): instead of sleep/wake the waker docker-stops
+Non-vLLM GPU tenants join the same budget via a `container.toml` in their model
+folder (currently `models/docling/`, `memory = 0.16`): instead of sleep/wake the waker docker-stops
 and -starts them. The waker binds their stable public port (`listen`, 8007 for
 docling — what Caddy routes to) and forwards to the real container (`upstream`,
 8011), so clients never notice the lifecycle. Its `sleep_ttl` doubles as leak
@@ -42,16 +42,16 @@ one guaranteed reclaim.
 
 ## Config
 
-No new config files. The waker reads:
-- `infra.toml` — which vLLM units exist + their ports (`./serve.py <slug>`).
-- `models.toml` — `memory` per slug, plus `sleep_level` (1 = weights→CPU RAM,
+No new config files. The waker reads the model folders:
+- `models/*/infra.toml` — which vLLM units exist + their ports (`serve.py <slug>`).
+- `models/*/model.toml` — `memory` per slug, plus `sleep_level` (1 = weights→CPU RAM,
   ~1 s wake, costs RAM; 2 = discard weights, ~seconds wake from NVMe, ~0 RAM) and
   `sleep_ttl`. Box RAM is tight (~9 GB spare of 59), so only the 0.6B models use
   level 1; chat and coder use level 2.
-- `[defaults]` in models.toml may set `waker_budget` / `waker_grace`.
+- `models/defaults.toml` may set `waker_budget` / `waker_grace`.
 
 vLLM only exposes `/sleep`, `/wake_up`, `/is_sleeping` under `VLLM_SERVER_DEV_MODE=1`
-— infra.toml bakes that into every vLLM unit. The endpoints (and the waker itself)
+— each model's infra.toml bakes that into its unit. The endpoints (and the waker itself)
 are unauthenticated but loopback-only + ufw-denied, the same trust model as the
 vLLM ports.
 
@@ -70,9 +70,10 @@ back at the direct ports (8001/8002/8004) and `docker restart litellm`.
 
 ## Enabling the coder
 
-1. `models.toml`: set `enable = true` on the coder block.
-2. `llm-config.yml`: uncomment the `qwen-coder` entry → `docker restart litellm`.
-3. `infra register && infra deploy && infra enable vllm-coder`.
+1. `models/coder/model.toml`: set `enable = true`.
+2. `llm-config.yml`: uncomment the `models/coder/litellm.yml` include line →
+   `docker restart litellm`.
+3. `cd models/coder && infra register && infra deploy && infra enable`.
 4. First boot needs the card: `curl -X POST localhost:8008/waker/sleep/chat` first
    (serve.py's fit check runs at unit start; `overhead_gb = 6.0` is an estimate —
    if it refuses wrongly, launch once with `--fit` and record the real overhead).
