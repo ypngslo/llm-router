@@ -27,13 +27,67 @@ project = "."
 # ufw (e.g. `sudo ufw deny 8001:8003/tcp`).
 bind_host = "0.0.0.0"
 
-# --- Chat (Qwen3.5-4B) -------------------------------------------------------
+# --- Chat (Qwen3.5-27B, GPTQ Int4) ---------------------------------------------
+# The largest chat model that CO-RUNS with embed-sm/rerank on this card:
+# 0.74 + 0.10 + 0.10 = 0.94 < 0.95 — no waker eviction dance, no NVMe re-wakes.
+# (Qwen3.5-35B-A3B-GPTQ-Int4 was tried 2026-07-08 and rejected on measurement:
+# 21.1 GiB weights in VRAM + ~2 GiB parked-tenant CUDA contexts + warmup
+# activations = OOM on the 31.4 GiB card; and its 23 GB checkpoint can't
+# page-cache in ~9 GB spare RAM → ~10 min reload per eviction.)
+# Non-negotiable Qwen3.5 flags (hybrid GDN family, per the 35B 5090 report):
+#   --dtype bfloat16              float16 CRASHES (mixed fp16/bf16 weight dtypes)
+#   --max-num-batched-tokens 2096 Mamba/GDN cache alignment requires it
+#   --kv-cache-dtype fp8          long context in a shared 32 GB budget
+#   --max-num-seqs 16             bounds the GDN state cache + profiling peak;
+#                                 agent workload is ≤3 concurrent anyway
 # params: Qwen3.5 emits XML-style tool calls, so qwen3_xml parser (NOT hermes,
 # which expects JSON). --enable-auto-tool-choice is required for the agent's
 # tool_choice="auto".
 [[model]]
+enable  = false
+slug    = "chat-27b"        # REJECTED 2026-07-08: "Int4" repo is 27.6 GiB in VRAM (29 GB on disk) — measured, does not fit
+name    = "Qwen/Qwen3.5-27B-GPTQ-Int4"
+task    = "generate"
+memory  = 0.74
+maxlen  = 32768
+overhead_gb = 5.0           # UNMEASURED estimate — serve.py runstats will record the real value
+params  = "--quantization gptq_marlin --dtype bfloat16 --kv-cache-dtype fp8 --max-num-batched-tokens 2096 --max-num-seqs 16 --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_xml --enable-sleep-mode"
+sleep_level = 2             # ~16 GB of weights — RAM can't hold them; NVMe reload
+sleep_ttl   = 0             # stay awake; evicted LRU only when another model needs the card
+weights = "~16 GB"          # GPTQ Int4 shards
+context = "262k"            # native (GDN hybrid); served at 32k (maxlen)
+
+# --- Chat (Qwen3.5-9B, online FP8) ---------------------------------------------
+# bf16 checkpoint (19.3 GB) quantized to FP8 by vLLM AT LOAD (--quantization fp8):
+# MEASURED 2026-07-08 on a scratch-port test boot: 10.81 GiB weights in VRAM,
+# 322,506 KV tokens at memory=0.62/maxlen=16384, tool calls verified through
+# qwen3_xml. Co-runs with embed-sm/rerank: 0.62+0.10+0.10 = 0.82.
+# Qwen3.5 non-negotiables: --dtype bfloat16 (fp16 crashes on mixed dtypes),
+# --max-num-batched-tokens 2096 (GDN cache alignment), qwen3_xml tool parser
+# (XML-style calls; hermes expects JSON), --enable-auto-tool-choice.
+[[model]]
 enable  = true
 slug    = "chat"            # vLLM --served-model-name; llm-config.yml must match this, not `name`
+name    = "Qwen/Qwen3.5-9B"
+task    = "generate"
+memory  = 0.62
+# 65536 (raised 2026-07-15 from the first-boot 12288): the scratch test measured
+# 322,506 KV tokens at this memory=0.62 budget, so a 64K window fits with ~5×
+# headroom. Hermes Agent requires >=64K context — this is its floor.
+maxlen  = 65536
+overhead_gb = 8.0           # family measurement (4B at 32k); 0.62 test left ample slack
+params  = "--quantization fp8 --dtype bfloat16 --kv-cache-dtype fp8 --max-num-batched-tokens 2096 --max-num-seqs 16 --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_xml --enable-sleep-mode"
+sleep_level = 2             # 19.3 GB checkpoint can't page-cache in ~9 GB spare RAM
+sleep_ttl   = 0             # stay awake; co-resident, so eviction is rare (docling bursts)
+weights = "10.8 GB"         # MEASURED in VRAM after online FP8
+context = "262k"            # native; served at 16k (as tested — raise only with a re-test)
+
+# --- Chat, small (Qwen3.5-4B) — rollback for the 9B above ----------------------
+# To roll back: enable=true here + false above, rename this slug to "chat",
+# and `infra restart vllm-chat`. Co-runs at 0.55.
+[[model]]
+enable  = false
+slug    = "chat-4b"
 name    = "Qwen/Qwen3.5-4B" # HF repo id
 task    = "generate"
 memory  = 0.55
@@ -44,12 +98,9 @@ maxlen  = 12288
 # overhead_gb: VRAM vLLM reserves beyond weights+KV (activations/CUDA graphs/profiling).
 # Measured ~8 GiB for this model at 32k; serve.py uses it for the launch fit check.
 overhead_gb = 8.0
-# fp8 KV: halves KV bytes/token (144→72 KB). Accuracy is fine at these lengths —
-# documented fp8-KV degradation starts well past 32k. serve.py's fit math halves
-# its KV estimate when it sees kv-cache-dtype fp8 in params.
 params  = "--reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_xml --enable-sleep-mode --kv-cache-dtype fp8"
 sleep_level = 2             # 8 GB of weights won't fit the box's spare RAM; reload from NVMe
-sleep_ttl   = 0             # stay awake; only slept when coder needs the card
+sleep_ttl   = 0
 weights = "~8 GB"           # bf16 weights (informational, shown in --list)
 context = "32k"             # model's native context window (informational)
 

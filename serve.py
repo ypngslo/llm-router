@@ -21,6 +21,7 @@ co-run only if their reservations fit alongside what's already resident.
 
 import os
 import re
+import signal
 import sys
 import json
 import time
@@ -98,12 +99,18 @@ def footprint(m):
     snap = hf_snapshot(m["name"])
     if snap is None:
         return None
-    # Weights: sum the actual on-disk shard sizes (works for bf16 and quantized alike).
+    # Weights: sum the actual on-disk shard sizes (works for bf16 and pre-quantized
+    # checkpoints alike — for those, disk ≈ VRAM).
     weights = sum(f.stat().st_size for f in snap.glob("*.safetensors"))
     if weights == 0:
         weights = sum(f.stat().st_size for f in snap.glob("*.bin"))  # legacy
     if weights == 0:
         return None
+    # ONLINE quantization (--quantization fp8 on a bf16 checkpoint) shrinks weights
+    # at load, so disk size overestimates VRAM. Factor measured 2026-07-08:
+    # Qwen3.5-9B, 18.0 GB on disk → 10.81 GiB in VRAM (embeddings/norms stay bf16).
+    if "--quantization fp8" in m.get("params", ""):
+        weights = int(weights * 0.60)
 
     cfg = json.loads((snap / "config.json").read_text())
     # Multimodal models (e.g. Qwen3.5) nest the LM params under text_config;
@@ -159,8 +166,48 @@ def unit_for_slug(slug):
     return None
 
 
-def record_runstats(m, port, memory, launched_at):
+def watchdog_kill(m, launcher_pid):
+    """Last-resort recovery for a launch that never became healthy: kill the unit's main
+    process so systemd restarts it.
+
+    vLLM can wedge silently at startup (observed: a boot-time hang before it ever binds
+    its port or creates a CUDA context). Because serve.py *exec*s into the launcher, the
+    unit's MainPID stays alive, systemd reports a healthy-looking `active`, and
+    Restart=on-failure never fires — the model is simply gone until a human restarts it.
+    The recorder already knows the launch failed (health deadline expired), so it doubles
+    as the watchdog: it holds the launcher's pid (exec preserves the pid, so it IS the
+    unit's MainPID) and kills it, handing recovery to systemd's normal RestartSec/start-
+    limit machinery.
+
+    SIGKILL, not SIGTERM — a trapped TERM can exit 0, which Restart=on-failure ignores.
+    Fires only when the pid still belongs to this model's systemd unit (cgroup check), so
+    a manual `PORT=… ./serve.py <slug>` run is never killed and a recycled pid can't be
+    hit by mistake.
+    """
+    unit = unit_for_slug(m["slug"])
+    if not unit:
+        print(f"[watchdog] {m['slug']}: no systemd unit in infra.toml — not intervening", flush=True)
+        return
+    try:
+        cgroup = Path(f"/proc/{launcher_pid}/cgroup").read_text()
+    except OSError:
+        print(f"[watchdog] {m['slug']}: launch pid {launcher_pid} already gone — nothing to kill", flush=True)
+        return
+    if f"{unit}.service" not in cgroup:
+        print(f"[watchdog] {m['slug']}: pid {launcher_pid} is not in {unit}.service "
+              "(manual run or recycled pid) — not intervening", flush=True)
+        return
+    print(f"[watchdog] {m['slug']}: killing hung launch (pid {launcher_pid}) so systemd "
+          f"restarts {unit}", flush=True)
+    try:
+        os.kill(launcher_pid, signal.SIGKILL)
+    except OSError as e:
+        print(f"[watchdog] {m['slug']}: kill failed: {e}", flush=True)
+
+
+def record_runstats(m, port, memory, launched_at, launcher_pid):
     """Runs in a detached child: wait for the server, scrape the journal, write stats.
+    If the server never comes up, act as the watchdog instead (see watchdog_kill).
 
     Never raises past its caller (spawn_recorder wraps it); prints go to the unit's
     journal tagged [runstats].
@@ -176,6 +223,7 @@ def record_runstats(m, port, memory, launched_at):
             time.sleep(10)
     else:
         print(f"[runstats] {m['slug']}: never became healthy — not recording", flush=True)
+        watchdog_kill(m, launcher_pid)
         return
     time.sleep(15)  # let the allocation settle
 
@@ -235,6 +283,9 @@ def spawn_recorder(m, port, memory):
     systemd and vLLM (see serve-sizing-plan.md P2).
     """
     launched_at = time.time()
+    # Captured BEFORE the forks: this process execs into the launcher without changing
+    # pid, so this is the systemd unit's MainPID — the watchdog's kill target.
+    launcher_pid = os.getpid()
     try:
         pid = os.fork()
     except OSError:
@@ -246,7 +297,7 @@ def spawn_recorder(m, port, memory):
     if os.fork() > 0:
         os._exit(0)
     try:
-        record_runstats(m, int(port), float(memory), launched_at)
+        record_runstats(m, int(port), float(memory), launched_at, launcher_pid)
     except Exception as e:
         print(f"[runstats] recorder crashed: {e}", flush=True)
     os._exit(0)
