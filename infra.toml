@@ -33,6 +33,6 @@ name = "waker"
 role = "backend"
 reach = "host"
 kind = "systemd"
-exec_start = "/home/beans/.local/bin/uv run --project /home/beans/code/system/llm-router waker.py"
+exec_start = "/home/beans/.local/bin/uv run --project /home/beans/code/system/llm-router src/waker.py"
 working_dir = "."
 port = 8008

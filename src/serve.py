@@ -5,9 +5,9 @@ Each model lives in models/<slug>/model.toml (the folder name is the slug);
 shared knobs in models/defaults.toml. This file just reads them and execs vllm.
 
 Usage:
-  ./serve.py <slug>          start the named model in the foreground
-  ./serve.py <slug> --fit    auto-size the budget to currently-free VRAM (override config)
-  ./serve.py --list          show the model table + predicted fit
+  ./src/serve.py <slug>          start the named model in the foreground
+  ./src/serve.py <slug> --fit    auto-size the budget to currently-free VRAM (override config)
+  ./src/serve.py --list          show the model table + predicted fit
 
 Before launching, serve.py derives the model's footprint (weights from the HF cache,
 KV bytes/token from config.json), reads how much VRAM is free *right now*, and checks
@@ -32,7 +32,7 @@ import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent
+REPO = Path(__file__).resolve().parent.parent   # this file lives in src/
 MODELS_DIR = REPO / "models"
 # P2 (serve-sizing-plan.md): measured per-run stats, written by a detached recorder
 # forked at launch. Gitignored — values are gpu/vllm-version/config specific.

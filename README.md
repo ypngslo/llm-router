@@ -34,8 +34,8 @@ models/
 
 | File | Role |
 |---|---|
-| `serve.py` | Launches one vLLM server per model — and **refuses to start** what won't fit |
-| `waker.py` | Sleep-aware reverse proxy that time-shares the GPU between models on demand |
+| `src/serve.py` | Launches one vLLM server per model — and **refuses to start** what won't fit |
+| `src/waker.py` | Sleep-aware reverse proxy that time-shares the GPU between models on demand |
 | `llm-config.yml` | LiteLLM router: stack-wide routing/budget settings + the model include list |
 | `docker-compose.yml` | LiteLLM + the CPU audio containers + docling |
 | `infra.toml` | The stack chassis (LiteLLM + waker) declared to my external `infra` CLI |
@@ -151,7 +151,7 @@ The second failure mode of a shared card is a unit that boots, OOMs the GPU
 - **Prefers measurement over formula.** At every launch it forks a detached
   recorder that waits for the server, scrapes the run's *actual* KV capacity
   from the journal, and stores it in `.runstats.json`. Future fit checks and
-  `./serve.py --list` use measured truth — which matters, because the formula
+  `./src/serve.py --list` use measured truth — which matters, because the formula
   is wildly wrong for hybrid-attention models (Qwen3.5's GDN layers: the
   formula predicts ~13K tokens where a real run measures ~420K).
 - The recorder doubles as a **watchdog**: if the server never becomes healthy,
@@ -160,7 +160,7 @@ The second failure mode of a shared card is a unit that boots, OOMs the GPU
   vLLM can hang at boot in ways systemd otherwise reports as `active`.
 
 ```
-$ ./serve.py --list
+$ ./src/serve.py --list
 SLUG    NAME                                     ON  MEM   TASK      MAXLEN   WEIGHTS   PRED-KV-TOK
 chat-27b Qwen/Qwen3.5-27B-GPTQ-Int4              no  0.74  generate  32768    ~16 GB    ?
 chat    Qwen/Qwen3.5-9B                          yes 0.62  generate  65536    10.8 GB   422,012*
@@ -210,7 +210,7 @@ latency are sliceable per app.
 ## Operations cheatsheet
 
 ```bash
-./serve.py --list                                # model table + live fit prediction
+./src/serve.py --list                                # model table + live fit prediction
 curl -s localhost:8008/waker/status | jq         # who's awake, in flight, idle
 curl -X POST localhost:8008/waker/sleep/chat     # force-park a model
 docker compose up -d                             # litellm + parakeet + kokoro + docling
@@ -229,13 +229,9 @@ curl http://127.0.0.1:4000/v1/chat/completions \
 - **Ports, units, and the HTTPS edge** are owned by a separate
   personal `infra` CLI that reads `infra.toml`; this repo only declares its
   services. Without it, the stack still runs by hand:
-  `PORT=8001 ./serve.py chat`, `PORT=8008 ./waker.py`, `docker compose up -d`.
+  `PORT=8001 ./src/serve.py chat`, `PORT=8008 ./src/waker.py`, `docker compose up -d`.
 - **Observability** (Langfuse + Postgres for LiteLLM's virtual keys and spend
   logs) is a sibling stack this config points at.
 - **Tests.** The programs are deliberately small enough to read, and the
   system's real test is the fit check + smoke curls above running on live
   hardware every day.
-
-## License
-
-MIT — see [LICENSE](LICENSE).

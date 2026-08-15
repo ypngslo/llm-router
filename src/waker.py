@@ -50,7 +50,7 @@ from pathlib import Path
 import aiohttp
 from aiohttp import web
 
-HERE = Path(__file__).resolve().parent
+REPO = Path(__file__).resolve().parent.parent   # this file lives in src/
 HEALTH_TIMEOUT = 300     # max seconds to wait for a woken backend to serve
 PROBE_INTERVAL = 30      # seconds between background state reconciliations
 HOP_HEADERS = {
@@ -62,14 +62,14 @@ AWAKE, ASLEEP, WAKING, DOWN = "awake", "asleep", "waking", "down"
 
 
 def load_config():
-    models_dir = HERE / "models"
+    models_dir = REPO / "models"
     with (models_dir / "defaults.toml").open("rb") as f:
         defaults = tomllib.load(f)
 
     # slug -> port, from the systemd services that launch "serve.py <slug>"
     # (each model's own models/<slug>/infra.toml, plus the root infra.toml)
     ports = {}
-    for path in [HERE / "infra.toml", *sorted(models_dir.glob("*/infra.toml"))]:
+    for path in [REPO / "infra.toml", *sorted(models_dir.glob("*/infra.toml"))]:
         with path.open("rb") as f:
             idata = tomllib.load(f)
         for svc in idata.get("service", []):

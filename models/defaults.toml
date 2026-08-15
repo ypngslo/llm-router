@@ -10,10 +10,10 @@
 #
 # VRAM budget (one RTX 5090 = 32 GB): each `vllm serve` reserves `memory` (a
 # fraction of the card) up front. Models co-run only if their enabled fractions
-# sum to < ~0.95. `./serve.py --list` prints the running total and the live fit.
+# sum to < ~0.95. `./src/serve.py --list` prints the running total and the live fit.
 #
 # Ports are NOT here: each model's infra.toml owns its port (infra bakes
-# Environment=PORT=<port> into the unit). Manual runs: `PORT=<n> ./serve.py <slug>`.
+# Environment=PORT=<port> into the unit). Manual runs: `PORT=<n> ./src/serve.py <slug>`.
 #
 # Sleep mode: every model runs with --enable-sleep-mode and sits behind waker.py
 # (the sleep-aware proxy on :8008 that LiteLLM actually talks to). Per-model knobs

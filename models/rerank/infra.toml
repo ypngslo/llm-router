@@ -4,7 +4,7 @@ name = "vllm-rerank"
 role = "backend"
 reach = "host"
 kind = "systemd"
-exec_start = "./serve.py rerank"
+exec_start = "./src/serve.py rerank"
 working_dir = "../.."
 port = 8004
 environment = { VLLM_SERVER_DEV_MODE = "1" }

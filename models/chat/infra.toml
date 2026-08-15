@@ -8,7 +8,7 @@ name = "vllm-chat"
 role = "backend"             # port range 8000–8099
 reach = "host"               # no Caddy route — only litellm reaches it, via loopback
 kind = "systemd"
-exec_start = "./serve.py chat"
+exec_start = "./src/serve.py chat"
 working_dir = "../.."
 port = 8001
 environment = { VLLM_SERVER_DEV_MODE = "1" }

@@ -61,8 +61,8 @@ vllm-<name>`. serve.py refuses to start a config that won't fit (run with
 ## Common commands
 
 ```bash
-./serve.py --list           # model table + live fit prediction (weights, KV tokens)
-PORT=8001 ./serve.py chat   # manual foreground run (systemd normally does this)
+./src/serve.py --list           # model table + live fit prediction (weights, KV tokens)
+PORT=8001 ./src/serve.py chat   # manual foreground run (systemd normally does this)
 curl -s localhost:8008/waker/status | jq        # sleep/wake state of every backend
 curl -X POST localhost:8008/waker/sleep/chat    # force-park (waker/wake/<slug> reverses)
 
@@ -103,7 +103,7 @@ replaced by measured runstats after a real run.
   `params` on whitespace.
 - **In a model's `infra.toml`**: `working_dir` resolves against that file's dir
   (`"../.."` = repo root); a relative `exec_start` resolves against `working_dir`
-  — so `"./serve.py <slug>"`, NOT `"../../serve.py <slug>"`.
+  — so `"./src/serve.py <slug>"`, NOT `"../../src/serve.py <slug>"`.
 - **LiteLLM's `include:` appends** `model_list` across files (verified in source);
   fragment paths resolve against `/app` in the container — the compose file mounts
   `./models:/app/models:ro` alongside the config. Both mounts are read-only:
