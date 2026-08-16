@@ -64,7 +64,7 @@ bigger is swapped in and out automatically — that's the interesting part.
 
 ## Architecture
 
-<img src="docs/architecture.svg" alt="Architecture map: apps call LiteLLM on :4000, which proxies GPU models through the waker scheduler (:8008) to vLLM tenants sharing one 32 GB RTX 5090 under a 0.92 VRAM budget — the ledger shows chat 0.62 + embeddings 0.10 + rerank 0.10 resident, with the 0.90 coder swapped in solo on demand. Audio goes to CPU containers, docling enters via Caddy through a waker passthrough with docker start/stop, and exhausted local retries or over-64K contexts escalate to OpenRouter under a $25/30-day cap." width="100%">
+<img src="docs/architecture.png" alt="Architecture map: apps call LiteLLM on :4000, which proxies GPU models through the waker scheduler (:8008) to vLLM tenants sharing one 32 GB RTX 5090 under a 0.92 VRAM budget — the ledger shows chat 0.62 + embeddings 0.10 + rerank 0.10 resident, with the 0.90 coder swapped in solo on demand. Audio goes to CPU containers, docling enters via Caddy through a waker passthrough with docker start/stop, and exhausted local retries or over-64K contexts escalate to OpenRouter under a $25/30-day cap." width="100%">
 
 The map above is the whole system: the front door never knows the GPU exists,
 the scheduler only ever manages GPU tenants, and the VRAM ledger at the right
